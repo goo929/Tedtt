@@ -1,31 +1,49 @@
-name: CI-RDP-Serveo
+name: CI
 
-on: 
-  workflow_dispatch:
+
+
+on: [push, workflow_dispatch]
+
+
 
 jobs:
-  build:
-    runs-on: windows-latest
-    steps:
-      - name: Configure RDP
-        shell: pwsh
-        run: |
-          # Enable RDP and firewall
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-          
-          # Set Password
-          $Password = ConvertTo-SecureString "GitHubRDP123!" -AsPlainText -Force
-          Set-LocalUser -Name "runneradmin" -Password $Password
 
-      - name: Start Serveo Tunnel
-        shell: pwsh
-        run: |
-          Write-Host "--- TUNNEL STARTING ---"
-          Write-Host "If the URL does not appear, refresh this page in 30 seconds."
-          
-          # This command asks serveo.net to forward a random port to your local 3389
-          # We use -o StrictHostKeyChecking=no to bypass the finger-print prompt
-          ssh -o StrictHostKeyChecking=no -R 0:localhost:3389 serveo.net
-          
+  build:
+
+
+
+    runs-on: windows-latest
+
+
+
+    steps:
+
+    - name: Download
+
+      run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+
+    - name: Extract
+
+      run: Expand-Archive ngrok.zip
+
+    - name: Auth
+
+      run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
+
+      env:
+
+        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+
+    - name: Enable TS
+
+      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+
+    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+
+    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+
+    - name: Create Tunnel
+
+      run: .\ngrok\ngrok.exe tcp 3389
