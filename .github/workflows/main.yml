@@ -1,29 +1,29 @@
- name: CI-RDP-Pinggy
+name: CI-RDP
 
-on: [push, workflow_dispatch]
+on: 
+  workflow_dispatch:
+  push:
 
 jobs:
   build:
     runs-on: windows-latest
-
     steps:
-    - name: Configure RDP
-      shell: pwsh
-      run: |
-        # Enable Remote Desktop
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-        
-        # Set Password
-        $Password = ConvertTo-SecureString "GitHubRDP123!" -AsPlainText -Force
-        Set-LocalUser -Name "runneradmin" -Password $Password
+      - name: Configure RDP Access
+        shell: pwsh
+        run: |
+          # Enable RDP and firewall rules
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+          
+          # Set the runneradmin password
+          $Password = ConvertTo-SecureString "GitHubRDP123!" -AsPlainText -Force
+          Set-LocalUser -Name "runneradmin" -Password $Password
 
-    - name: Start Network Tunnel
-      shell: pwsh
-      run: |
-        Write-Host "Connecting to Tunnel... Look for the public address below."
-        # This uses the native Windows SSH client to create a tunnel
-        # No download required, no credit card required.
-        ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:3389 a.pinggy.io
-        
+      - name: Start Network Tunnel
+        shell: pwsh
+        run: |
+          Write-Host "Connecting to Tunnel... Look for the public address in the logs below."
+          # This creates a TCP tunnel using the native Windows SSH client
+          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:3389 a.pinggy.io
+          
