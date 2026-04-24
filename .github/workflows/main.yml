@@ -1,4 +1,4 @@
-name: CI-RDP
+name: CI-RDP-Fixed
 
 on: 
   workflow_dispatch:
@@ -11,19 +11,22 @@ jobs:
       - name: Configure RDP Access
         shell: pwsh
         run: |
-          # Enable RDP and firewall rules
+          # 1. Enable RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           
-          # Set the runneradmin password
+          # 2. Set the password
           $Password = ConvertTo-SecureString "GitHubRDP123!" -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Password
 
       - name: Start Network Tunnel
         shell: pwsh
         run: |
-          Write-Host "Connecting to Tunnel... Look for the public address in the logs below."
-          # This creates a TCP tunnel using the native Windows SSH client
-          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:3389 a.pinggy.io
+          Write-Host "--- TUNNEL STARTING ---"
+          Write-Host "Look for the TCP address (e.g., rncxxx.a.pinggy.link:12345) below."
+          
+          # -t -t forces a terminal, which makes Pinggy show the URL banner
+          # -o ExitOnForwardFailure=yes ensures we know if it fails
+          ssh -o StrictHostKeyChecking=no -o ExitOnForwardFailure=yes -t -t -p 443 -R0:localhost:3389 a.pinggy.io
           
