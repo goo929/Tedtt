@@ -1,4 +1,4 @@
-name: CI-RDP-Fixed
+name: CI-RDP-Pinggy-Final
 
 on: 
   workflow_dispatch:
@@ -11,22 +11,23 @@ jobs:
       - name: Configure RDP Access
         shell: pwsh
         run: |
-          # 1. Enable RDP
+          # 1. Enable Remote Desktop and Firewall
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           
-          # 2. Set the password
+          # 2. Set the runneradmin password
           $Password = ConvertTo-SecureString "GitHubRDP123!" -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Password
+          Write-Host "RDP Configuration Complete."
 
       - name: Start Network Tunnel
         shell: pwsh
         run: |
-          Write-Host "--- TUNNEL STARTING ---"
-          Write-Host "Look for the TCP address (e.g., rncxxx.a.pinggy.link:12345) below."
+          Write-Host "--- TUNNEL INITIALIZING ---"
+          Write-Host "Wait 10-15 seconds for the URL to appear below."
           
-          # -t -t forces a terminal, which makes Pinggy show the URL banner
-          # -o ExitOnForwardFailure=yes ensures we know if it fails
-          ssh -o StrictHostKeyChecking=no -o ExitOnForwardFailure=yes -t -t -p 443 -R0:localhost:3389 a.pinggy.io
+          # 'tcp+1' forces Pinggy to output a plain-text URL compatible with GitHub logs.
+          # -o StrictHostKeyChecking=no prevents the 'yes/no' prompt.
+          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:3389 tcp+1@a.pinggy.io
           
