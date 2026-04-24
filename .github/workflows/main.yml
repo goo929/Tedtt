@@ -1,33 +1,31 @@
-name: CI-RDP-Pinggy-Final
+name: CI-RDP-Serveo
 
 on: 
   workflow_dispatch:
-  push:
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Configure RDP Access
+      - name: Configure RDP
         shell: pwsh
         run: |
-          # 1. Enable Remote Desktop and Firewall
+          # Enable RDP and firewall
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           
-          # 2. Set the runneradmin password
+          # Set Password
           $Password = ConvertTo-SecureString "GitHubRDP123!" -AsPlainText -Force
           Set-LocalUser -Name "runneradmin" -Password $Password
-          Write-Host "RDP Configuration Complete."
 
-      - name: Start Network Tunnel
+      - name: Start Serveo Tunnel
         shell: pwsh
         run: |
-          Write-Host "--- TUNNEL INITIALIZING ---"
-          Write-Host "Wait 10-15 seconds for the URL to appear below."
+          Write-Host "--- TUNNEL STARTING ---"
+          Write-Host "If the URL does not appear, refresh this page in 30 seconds."
           
-          # 'tcp+1' forces Pinggy to output a plain-text URL compatible with GitHub logs.
-          # -o StrictHostKeyChecking=no prevents the 'yes/no' prompt.
-          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:3389 tcp+1@a.pinggy.io
+          # This command asks serveo.net to forward a random port to your local 3389
+          # We use -o StrictHostKeyChecking=no to bypass the finger-print prompt
+          ssh -o StrictHostKeyChecking=no -R 0:localhost:3389 serveo.net
           
