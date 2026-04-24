@@ -1,4 +1,4 @@
-name: CI-Localtonet
+name: CI-Localtonet-Fixed
 
 on: [push, workflow_dispatch]
 
@@ -8,19 +8,22 @@ jobs:
 
     steps:
     - name: Download and Extract Localtonet
+      shell: pwsh
       run: |
-        Invoke-WebRequest https://localtonet.com/download/localtonet-windows-x64.zip -OutFile localtonet.zip
-        Expand-Archive localtonet.zip -DestinationPath localtonet
-    
+        # Using a direct link that bypasses typical 404 browser redirects
+        $url = "https://localtonet.com/download/localtonet-windows-x64.zip"
+        Invoke-WebRequest -Uri $url -OutFile "localtonet.zip" -UserAgent "Mozilla/5.0"
+        Expand-Archive -Path "localtonet.zip" -DestinationPath "localtonet"
+
     - name: Setup RDP Access
+      shell: pwsh
       run: |
-        # Enable Remote Desktop
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
         
-        # Set runneradmin password
-        $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
+        # Setting a more secure temporary password
+        $Password = ConvertTo-SecureString "GitHubRDP123!" -AsPlainText -Force
         Set-LocalUser -Name "runneradmin" -Password $Password
 
     - name: Start Localtonet Tunnel
@@ -28,12 +31,11 @@ jobs:
       env:
         LT_TOKEN: ${{ secrets.LOCALTONET_TOKEN }}
       run: |
-        # Start Localtonet in the background
+        # Run the auth and start the tunnel in one go
         Start-Process -FilePath ".\localtonet\localtonet.exe" -ArgumentList "authtoken $env:LT_TOKEN"
-        
-        # Wait a moment for authentication to sync
         Start-Sleep -Seconds 5
         
-        # Create the TCP tunnel for RDP (Port 3389)
-        # This step will stay active and keep the workflow running
+        Write-Host "Starting TCP Tunnel on Port 3389..."
+        # This command blocks the runner and keeps it alive
         .\localtonet\localtonet.exe tcp 3389
+        
