@@ -1,4 +1,4 @@
-name: CI-Localtonet-Fixed
+ name: CI-RDP-Pinggy
 
 on: [push, workflow_dispatch]
 
@@ -7,35 +7,23 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Download and Extract Localtonet
+    - name: Configure RDP
       shell: pwsh
       run: |
-        # Using a direct link that bypasses typical 404 browser redirects
-        $url = "https://localtonet.com/download/localtonet-windows-x64.zip"
-        Invoke-WebRequest -Uri $url -OutFile "localtonet.zip" -UserAgent "Mozilla/5.0"
-        Expand-Archive -Path "localtonet.zip" -DestinationPath "localtonet"
-
-    - name: Setup RDP Access
-      shell: pwsh
-      run: |
+        # Enable Remote Desktop
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
         
-        # Setting a more secure temporary password
+        # Set Password
         $Password = ConvertTo-SecureString "GitHubRDP123!" -AsPlainText -Force
         Set-LocalUser -Name "runneradmin" -Password $Password
 
-    - name: Start Localtonet Tunnel
+    - name: Start Network Tunnel
       shell: pwsh
-      env:
-        LT_TOKEN: ${{ secrets.LOCALTONET_TOKEN }}
       run: |
-        # Run the auth and start the tunnel in one go
-        Start-Process -FilePath ".\localtonet\localtonet.exe" -ArgumentList "authtoken $env:LT_TOKEN"
-        Start-Sleep -Seconds 5
-        
-        Write-Host "Starting TCP Tunnel on Port 3389..."
-        # This command blocks the runner and keeps it alive
-        .\localtonet\localtonet.exe tcp 3389
+        Write-Host "Connecting to Tunnel... Look for the public address below."
+        # This uses the native Windows SSH client to create a tunnel
+        # No download required, no credit card required.
+        ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:3389 a.pinggy.io
         
