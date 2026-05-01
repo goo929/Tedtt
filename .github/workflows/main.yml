@@ -6,41 +6,46 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-    - name: Configure High-Speed RDP
+    - name: Deep Reset RDP Settings
       run: |
-        # 1. Enable RDP
+        # 1. Kill any existing RDP processes and listeners
+        stop-service termservice -force
+        
+        # 2. Force RDP to use standard Port 3389 and enable
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         
-        # 2. DISABLE Network Level Authentication (NLA) - This fixes the "Stuck" screen
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 1 -Force
+        # 3. Disable NLA and Force Security Layer 0 (Basic RDP)
+        # This is the "Emergency Mode" that works even on the worst network connections
+        $path = "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
+        Set-ItemProperty -Path $path -Name "UserAuthentication" -Value 0 -Force
+        Set-ItemProperty -Path $path -Name "SecurityLayer" -Value 0 -Force
         
-        # 3. Allow unencrypted connections (Better for high-latency mobile data)
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "MinEncryptionLevel" -Value 1 -Force
+        # 4. Open Firewall
+        netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
+        netsh advfirewall firewall add rule name="RDP-3389" dir=in action=allow protocol=TCP localport=3389
         
-        netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
-        Restart-Service -Name TermService -Force
+        # 5. Start Service
+        start-service termservice
 
     - name: Create RDP User
       run: |
-        # Using a simple password to avoid keyboard entry errors on mobile
         $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
-        New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
-        Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
+        if (!(Get-LocalUser -Name "RemoteUser" -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
+            Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
+        }
 
-    - name: Install Ngrok
+    - name: Install and Start Ngrok
       run: |
-        # Using winget for the most reliable install
+        # Use winget for the official stable version
         winget install ngrok.ngrok --accept-package-agreements --accept-source-agreements
-
-    - name: Start Ngrok Tunnel
-      run: |
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        
+        # Auth and Start
         ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
         
-        # Start tunnel with your permanent domain
-        Start-Process -FilePath "ngrok" -ArgumentList "tcp --domain=accusatorial-hyacinth-steer.ngrok-free.dev 3389"
+        # Using a higher heartbeat to prevent mobile data drops
+        Start-Process -FilePath "ngrok" -ArgumentList "tcp --domain=accusatorial-hyacinth-steer.ngrok-free.dev 3389 --heartbeat-interval 10s"
         
         Write-Host "🚀 RDP live at: accusatorial-hyacinth-steer.ngrok-free.dev"
         Start-Sleep -s 21600
-        
