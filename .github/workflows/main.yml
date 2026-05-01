@@ -1,4 +1,4 @@
-name: CI-Ngrok-Final-RDP
+name: CI-Pinggy-RDP
 
 on: [push, workflow_dispatch]
 
@@ -6,46 +6,28 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-    - name: Deep Reset RDP Settings
+    - name: Configure RDP
       run: |
-        # 1. Kill any existing RDP processes and listeners
-        stop-service termservice -force
-        
-        # 2. Force RDP to use standard Port 3389 and enable
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-        
-        # 3. Disable NLA and Force Security Layer 0 (Basic RDP)
-        # This is the "Emergency Mode" that works even on the worst network connections
-        $path = "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
-        Set-ItemProperty -Path $path -Name "UserAuthentication" -Value 0 -Force
-        Set-ItemProperty -Path $path -Name "SecurityLayer" -Value 0 -Force
-        
-        # 4. Open Firewall
-        netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
-        netsh advfirewall firewall add rule name="RDP-3389" dir=in action=allow protocol=TCP localport=3389
-        
-        # 5. Start Service
-        start-service termservice
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+        netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
+        Restart-Service -Name TermService -Force
 
     - name: Create RDP User
       run: |
         $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
-        if (!(Get-LocalUser -Name "RemoteUser" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
-            Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
-        }
+        New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
+        Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
 
-    - name: Install and Start Ngrok
+    - name: Start Rugged SSH Tunnel
       run: |
-        # Use winget for the official stable version
-        winget install ngrok.ngrok --accept-package-agreements --accept-source-agreements
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        Write-Host "🚀 Starting Pinggy Tunnel..."
+        # This loop restarts the tunnel automatically if it flickers
+        while ($true) {
+            # This opens a TCP tunnel. It will output the address in the logs.
+            ssh -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 rdp@a.pinggy.io
+            Write-Host "⚠️ Connection flickered. Reconnecting in 5s..."
+            Start-Sleep -s 5
+        }
         
-        # Auth and Start
-        ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
-        
-        # Using a higher heartbeat to prevent mobile data drops
-        Start-Process -FilePath "ngrok" -ArgumentList "tcp --domain=accusatorial-hyacinth-steer.ngrok-free.dev 3389 --heartbeat-interval 10s"
-        
-        Write-Host "🚀 RDP live at: accusatorial-hyacinth-steer.ngrok-free.dev"
-        Start-Sleep -s 21600
