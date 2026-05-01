@@ -1,69 +1,108 @@
-name: ZeroTier-RDP-Fixed
+name: RDP
 
-on:
+on:  
   workflow_dispatch:
 
-jobs:
-  secure-rdp:
-    runs-on: windows-latest
-    timeout-minutes: 3600
+jobs:  
+  secure-rdp:  
+    runs-on: windows-latest  
+    timeout-minutes: 3600  
 
-    steps:
-      - name: Configure Core RDP
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-          netsh advfirewall firewall add rule name="RDP-ZT" dir=in action=allow protocol=TCP localport=3389
-          Restart-Service -Name TermService -Force
+    steps:  
+      - name: Configure Core RDP Settings  
+        run: |  
+          # Enable Remote Desktop and disable Network Level Authentication (if needed)  
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `  
+                             -Name "fDenyTSConnections" -Value 0 -Force  
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `  
+                             -Name "UserAuthentication" -Value 0 -Force  
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `  
+                             -Name "SecurityLayer" -Value 0 -Force  
 
-      - name: Create RDP User
-        run: |
-          $pass = "P@ssw0rd123!" # Using a static one for now to avoid env issues
-          $securePass = ConvertTo-SecureString $pass -AsPlainText -Force
-          New-LocalUser -Name "RDP_User" -Password $securePass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP_User"
-          Write-Host "User: RDP_User | Pass: $pass"
+          # Remove any existing rule with the same name to avoid duplication  
+          netsh advfirewall firewall delete rule name="RDP-Playit"  
+            
+          # For testing, allow any incoming connection on port 3389  
+          netsh advfirewall firewall add rule name="RDP-Playit" `  
+            dir=in action=allow protocol=TCP localport=3389  
 
-      - name: Install ZeroTier
-        run: |
-          $tsUrl = "https://download.zerotier.com/dist/ZeroTier%20One.msi"
-          $installerPath = "$env:TEMP\zerotier.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          # (Optional) Restart the Remote Desktop service to ensure changes take effect  
+          Restart-Service -Name TermService -Force  
 
-      - name: Join Network (Aggressive Search)
-        run: |
-          # Wait for files to appear after quiet install
-          Start-Sleep -Seconds 15
-          
-          # Find the executable wherever it may be
-          $ztCli = Get-ChildItem -Path "C:\Program Files*" -Filter "zerotier-one_x64.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-          
-          if ($null -eq $ztCli) {
-              Write-Error "ZeroTier executable not found in Program Files. Checking service..."
-              exit 1
+      - name: Create RDP User with Secure Password  
+        run: |  
+          Add-Type -AssemblyName System.Security  
+          $charSet = @{  
+              Upper   = [char[]](65..90)      # A-Z  
+              Lower   = [char[]](97..122)     # a-z  
+              Number  = [char[]](48..57)      # 0-9  
+              Special = ([char[]](33..47) + [char[]](58..64) +  
+                         [char[]](91..96) + [char[]](123..126)) # Special characters  
+          }  
+          $rawPassword = @()  
+          $rawPassword += $charSet.Upper | Get-Random -Count 4  
+          $rawPassword += $charSet.Lower | Get-Random -Count 4  
+          $rawPassword += $charSet.Number | Get-Random -Count 4  
+          $rawPassword += $charSet.Special | Get-Random -Count 4  
+          $password = -join ($rawPassword | Sort-Object { Get-Random })  
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force  
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires  
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"  
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"  
+            
+          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV  
+            
+          if (-not (Get-LocalUser -Name "RDP")) {  
+              Write-Error "User creation failed"  
+              exit 1  
+          }  
+
+      - name: Install Playit Client  
+        run: |  
+          # Download and install Playit client  
+          $playitUrl = "https://github.com/playit-cloud/playit-cli/releases/download/v0.6.0/playit-windows-amd64.exe"  
+          $installerPath = "$env:TEMP\playit.exe"  
+          Invoke-WebRequest -Uri $playitUrl -OutFile $installerPath  
+          Move-Item $installerPath -Destination "$env:ProgramFiles\Playit"  
+
+      - name: Establish Playit Tunnel  
+        run: |  
+          # Run Playit to establish a tunnel and connect to the server  
+          & "$env:ProgramFiles\Playit\playit.exe" --create --subdomain=rdp-tunnel --tcp --port=3389  
+            
+          # Wait for the tunnel to establish and grab the external address  
+          $playitStatus = & "$env:ProgramFiles\Playit\playit.exe" --status  
+          Write-Host "Playit Tunnel Status: $playitStatus"  
+
+          if ($playitStatus -notmatch "active") {  
+              Write-Error "Playit Tunnel failed to start"  
+              exit 1  
+          }  
+
+          echo "PLAYIT_TUNNEL=rdp-tunnel.playit.gg:3389" >> $env:GITHUB_ENV  
+        
+      - name: Verify RDP Accessibility  
+        run: |  
+          Write-Host "Playit Tunnel Address: $env:PLAYIT_TUNNEL"  
+
+          # Test connectivity using Test-NetConnection against the Playit tunnel address  
+          $testResult = Test-NetConnection -ComputerName $env:PLAYIT_TUNNEL -Port 3389  
+          if (-not $testResult.TcpTestSucceeded) {  
+              Write-Error "TCP connection to Playit tunnel port 3389 failed"  
+              exit 1  
+          }  
+          Write-Host "TCP connectivity successful!"  
+
+      - name: Maintain Connection  
+        run: |  
+          Write-Host "`n=== RDP ACCESS ==="  
+          Write-Host "Address: $env:PLAYIT_TUNNEL"  
+          Write-Host "Username: RDP"  
+          Write-Host "Password: $(echo $env:RDP_CREDS)"  
+          Write-Host "==================`n"  
+
+          # Keep the runner active until manually canceled  
+          while ($true) {  
+              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"  
+              Start-Sleep -Seconds 300  
           }
-          
-          Write-Host "Found ZeroTier at: $ztCli"
-          
-          # Join the network
-          & $ztCli -q join 76fc96e498103c1c
-          
-          # Wait and grab IP
-          Start-Sleep -Seconds 25
-          $info = & $ztCli -q listnetworks
-          $info
-          
-          $ztIP = ($info | Select-String -Pattern "(\d{1,3}\.){3}\d{1,3}").Matches.Value | Select-Object -First 1
-          Write-Host "-------------------------------"
-          Write-Host "ZT IP: $ztIP"
-          Write-Host "-------------------------------"
-
-      - name: Maintain Connection
-        run: |
-          while ($true) {
-              Write-Host "RDP Active - $(Get-Date)"
-              Start-Sleep -Seconds 300
-          }
-          
