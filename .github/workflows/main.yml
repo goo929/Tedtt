@@ -21,27 +21,30 @@ jobs:
 
     - name: Create RDP User
       run: |
-        # Using a dedicated user to fix the "Username or password did not work" error
         $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
         New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
         Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RemoteUser"
 
-    - name: Setup Ngrok
+    - name: Install Ngrok via Winget
       run: |
-        # Download and extract Ngrok
-        Invoke-WebRequest https://bin.equinox.io/c/b34edq6tiuz/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
-        Expand-Archive ngrok.zip -DestinationPath .
+        # Winget finds the correct download link automatically
+        winget install ngrok.ngrok --accept-package-agreements --accept-source-agreements
+
+    - name: Start Ngrok Tunnel
+      run: |
+        # Refresh path so the runner can see the new 'ngrok' command
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
         
-        # Authenticate using your secret token
-        .\ngrok.exe config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+        # Authenticate
+        ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
         
-        # Start the tunnel using your specific static domain
-        # Replace the domain below if you ever change it in the Ngrok dashboard
-        Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp --domain=accusatorial-hyacinth-steer.ngrok-free.dev 3389"
+        # Start the tunnel using your static domain
+        # Using Start-Process so it runs in the background
+        Start-Process -FilePath "ngrok" -ArgumentList "tcp --domain=accusatorial-hyacinth-steer.ngrok-free.dev 3389"
         
         Write-Host "🚀 RDP live at: accusatorial-hyacinth-steer.ngrok-free.dev"
         
-        # Keep alive for the full 6-hour runner limit
+        # Keep alive for 6 hours
         Start-Sleep -s 21600
-        w
+        
