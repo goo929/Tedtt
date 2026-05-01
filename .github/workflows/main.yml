@@ -1,4 +1,4 @@
-name: CI-Bore-RDP-Resilient
+name: CI-Ngrok-Final-RDP
 
 on: [push, workflow_dispatch]
 
@@ -8,58 +8,40 @@ jobs:
     steps:
     - name: Configure Core RDP Settings
       run: |
+        # Enable RDP and optimize for mobile tunnel stability
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-        netsh advfirewall firewall add rule name="RDP-Bore" dir=in action=allow protocol=TCP localport=3389
+        
+        # Open Firewall for port 3389
+        netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
+        
+        # Restart RDP Service to apply settings
         Restart-Service -Name TermService -Force
 
     - name: Create RDP User
       run: |
+        # Using a dedicated user to fix the "Username or password did not work" error
         $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
-        if (!(Get-LocalUser -Name "RemoteUser" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
-            Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
-            Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RemoteUser"
-        }
+        New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
+        Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RemoteUser"
 
-    - name: Download Bore
+    - name: Setup Ngrok
       run: |
-        $url = "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip"
-        Invoke-WebRequest -Uri $url -OutFile bore.zip -UserAgent "NativeHost"
-        Expand-Archive bore.zip -DestinationPath . -Force
-
-    - name: Start Resilient Bore Tunnel
-      run: |
-        $totalTime = 21600 # 6 hours in seconds
-        $startTime = Get-Date
+        # Download and extract Ngrok
+        Invoke-WebRequest https://bin.equinox.io/c/b34edq6tiuz/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+        Expand-Archive ngrok.zip -DestinationPath .
         
-        Write-Host "🚀 Starting Resilient Tunnel Loop..."
+        # Authenticate using your secret token
+        .\ngrok.exe config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
         
-        while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -lt $totalTime) {
-            Write-Host "Connecting to Bore..."
-            # Start Bore and capture output
-            $process = Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -PassThru -RedirectStandardOutput "bore_log.txt" -NoNewWindow
-            
-            # Wait for port assignment
-            Start-Sleep -s 5
-            $portInfo = Get-Content bore_log.txt | Select-String "listening at" | Select-Object -Last 1
-            
-            Write-Host "--------------------------"
-            Write-Host "CONNECTED: $portInfo"
-            Write-Host "User: RemoteUser | Pass: P@ssw0rd123!"
-            Write-Host "--------------------------"
-            
-            # Monitor the process. If it dies, the loop restarts it.
-            while (!$process.HasExited) {
-                Start-Sleep -s 10
-                # Safety check to break loop after 6 hours total
-                if ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -ge $totalTime) { 
-                    Stop-Process -Id $process.Id
-                    break 
-                }
-            }
-            Write-Host "⚠️ Connection lost or flickered. Restarting tunnel..."
-            Remove-Item "bore_log.txt" -ErrorAction SilentlyContinue
-        }
+        # Start the tunnel using your specific static domain
+        # Replace the domain below if you ever change it in the Ngrok dashboard
+        Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp --domain=accusatorial-hyacinth-steer.ngrok-free.dev 3389"
         
+        Write-Host "🚀 RDP live at: accusatorial-hyacinth-steer.ngrok-free.dev"
+        
+        # Keep alive for the full 6-hour runner limit
+        Start-Sleep -s 21600
+        w
