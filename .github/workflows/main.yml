@@ -110,13 +110,25 @@ jobs:
               Write-Host "Playit client found at $playitPath"
           }
 
-      - name: Establish Playit Tunnel  
-        run: |  
+      - name: Try to Run Playit Client  
+        run: |
+          # Let's check if the playit.exe is executable
+          $playitPath = "$env:ProgramFiles\Playit\playit.exe"
+          
+          # Check if the file is actually executable on this environment
+          $isExecutable = (Test-Path $playitPath) -and (Get-Command $playitPath -ErrorAction SilentlyContinue)
+          if (-not $isExecutable) {
+              Write-Error "Playit client is not executable at $playitPath"
+              exit 1
+          }
+          
+          Write-Host "Playit client is executable, attempting to start the tunnel..."
+
           # Run Playit to establish a tunnel and connect to the server  
-          & "$env:ProgramFiles\Playit\playit.exe" --create --subdomain=rdp-tunnel --tcp --port=3389  
+          & "$playitPath" --create --subdomain=rdp-tunnel --tcp --port=3389  
             
           # Wait for the tunnel to establish and grab the external address  
-          $playitStatus = & "$env:ProgramFiles\Playit\playit.exe" --status  
+          $playitStatus = & "$playitPath" --status  
           Write-Host "Playit Tunnel Status: $playitStatus"  
 
           if ($playitStatus -notmatch "active") {  
@@ -148,6 +160,4 @@ jobs:
 
           # Keep the runner active until manually canceled  
           while ($true) {  
-              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"  
-              Start-Sleep -Seconds 300  
-          }
+              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl
