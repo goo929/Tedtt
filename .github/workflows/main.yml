@@ -1,4 +1,4 @@
-name: CI-Bore-RDP
+name: CI-Stable-RDP
 
 on: [push, workflow_dispatch]
 
@@ -8,49 +8,32 @@ jobs:
     steps:
     - name: Configure Core RDP Settings
       run: |
-        # 1. Force Enable RDP and lower security for tunnel compatibility
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-        
-        # 2. Open Firewall specifically for port 3389
-        netsh advfirewall firewall add rule name="RDP-Bore" dir=in action=allow protocol=TCP localport=3389
-        
-        # 3. Restart the service to apply changes (CRITICAL)
+        netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
         Restart-Service -Name TermService -Force
 
     - name: Create RDP User
       run: |
-        # Create user 'RemoteUser' with the password you expect
         $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
         New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
         Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
         Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RemoteUser"
 
-    - name: Download and Setup Bore
+    - name: Setup Playit.gg (Highly Stable)
       run: |
-        $url = "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip"
-        Invoke-WebRequest -Uri $url -OutFile bore.zip -UserAgent "NativeHost"
-        Expand-Archive bore.zip -DestinationPath . -Force
-
-    - name: Start Bore Tunnel
-      run: |
-        # Start bore in background and log the output
-        Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "bore_log.txt"
+        # Download the Playit agent
+        Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe" -OutFile "playit.exe"
         
-        # Wait for the server to assign the port
-        Start-Sleep -s 10
+        # Start playit in the background
+        # Note: On first run, it will provide a CLAIM URL in the logs. 
+        # You click it once to link it to a free account, and then it stays permanent.
+        Start-Process -FilePath ".\playit.exe" -ArgumentList "--secret ${{ secrets.PLAYIT_SECRET }}" -RedirectStandardOutput "playit_log.txt"
         
-        $BoreLog = Get-Content bore_log.txt
-        Write-Host "--------------------------"
-        Write-Host "   RDP CONNECTION INFO    "
-        Write-Host "--------------------------"
-        # This grabs the actual address you need to type into your phone
-        $BoreLog | Select-String "listening at"
-        Write-Host "Username: RemoteUser"
-        Write-Host "Password: P@ssw0rd123!"
-        Write-Host "--------------------------"
+        Start-Sleep -s 15
+        Get-Content playit_log.txt | Select-String "claim" || Get-Content playit_log.txt
         
-        # Keep the runner alive
-        Start-Sleep -s 21600
-        
+    - name: Keep Alive
+      run: Start-Sleep -s 21600
+      
