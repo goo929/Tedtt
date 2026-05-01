@@ -25,21 +25,30 @@ jobs:
       run: |
         winget install DevelopedMethods.playit --accept-package-agreements --accept-source-agreements
 
-    - name: Start Playit Agent
+    - name: Find and Start Playit Agent
       run: |
-        $playitPath = "C:\Program Files\playit\playit.exe"
+        # Search for the playit.exe file anywhere on the system
+        Write-Host "Searching for playit.exe..."
+        $playitFile = Get-ChildItem -Path "C:\" -Filter "playit.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         
-        # We start it without the --secret flag to generate a new Claim URL
-        if (Test-Path $playitPath) {
-            Start-Process -FilePath $playitPath -RedirectStandardOutput "playit_log.txt"
+        if ($playitFile) {
+            $fullPath = $playitFile.FullName
+            Write-Host "Found Playit at: $fullPath"
+            
+            # Start the process using the discovered path
+            Start-Process -FilePath $fullPath -RedirectStandardOutput "playit_log.txt"
+            
+            # Wait for logs to populate
+            Start-Sleep -s 30
+            
+            Write-Host "--- LOOK BELOW FOR CLAIM URL ---"
+            Get-Content playit_log.txt | Select-String "https://playit.gg/claim/"
+            Write-Host "---------------------------------"
         } else {
-            Start-Process -FilePath "playit.exe" -RedirectStandardOutput "playit_log.txt"
+            Write-Error "Could not find playit.exe after installation."
+            exit 1
         }
         
-        Start-Sleep -s 30
-        Write-Host "--- LOOK BELOW FOR CLAIM URL ---"
-        Get-Content playit_log.txt | Select-String "https://playit.gg/claim/"
-        Write-Host "---------------------------------"
-        
+        # Keep alive for 6 hours
         Start-Sleep -s 21600
-        a
+        
