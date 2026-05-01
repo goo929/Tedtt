@@ -8,15 +8,10 @@ jobs:
     steps:
     - name: Configure Core RDP Settings
       run: |
-        # Force Enable RDP and lower security for tunnel compatibility
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-        
-        # Open Firewall for port 3389
         netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
-        
-        # Restart the service to apply changes
         Restart-Service -Name TermService -Force
 
     - name: Create RDP User
@@ -28,21 +23,23 @@ jobs:
 
     - name: Install Playit via Winget
       run: |
-        # Use winget to install playit - much more stable than Invoke-WebRequest
         winget install DevelopedMethods.playit --accept-package-agreements --accept-source-agreements
 
     - name: Start Playit Agent
       run: |
-        # Start playit in the background and pipe output to a file
-        Start-Process -FilePath "playit" -ArgumentList "--secret ${{ secrets.PLAYIT_SECRET }}" -RedirectStandardOutput "playit_log.txt"
+        $playitPath = "C:\Program Files\playit\playit.exe"
         
-        # Wait for it to generate the claim URL or address
-        Start-Sleep -s 20
+        # We start it without the --secret flag to generate a new Claim URL
+        if (Test-Path $playitPath) {
+            Start-Process -FilePath $playitPath -RedirectStandardOutput "playit_log.txt"
+        } else {
+            Start-Process -FilePath "playit.exe" -RedirectStandardOutput "playit_log.txt"
+        }
         
-        Write-Host "--- PLAYIT STATUS / CLAIM URL ---"
-        Get-Content playit_log.txt
+        Start-Sleep -s 30
+        Write-Host "--- LOOK BELOW FOR CLAIM URL ---"
+        Get-Content playit_log.txt | Select-String "https://playit.gg/claim/"
         Write-Host "---------------------------------"
         
-        # Keep the runner alive for 6 hours
         Start-Sleep -s 21600
-        
+        a
