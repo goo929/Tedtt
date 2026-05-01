@@ -76,8 +76,28 @@ jobs:
           # Download the Playit client using curl
           curl -L $playitUrl -o $installerPath
           
+          # Verify the file is downloaded
+          if (-not (Test-Path $installerPath)) {
+              Write-Error "Failed to download Playit client"
+              exit 1
+          }
+          
+          # Create the directory for Playit if it doesn't exist
+          $playitDir = "$env:ProgramFiles\Playit"
+          if (-not (Test-Path $playitDir)) {
+              New-Item -Path $playitDir -ItemType Directory
+          }
+          
           # Move it to the Program Files directory
-          Move-Item $installerPath -Destination "$env:ProgramFiles\Playit"  
+          Move-Item $installerPath -Destination "$playitDir\playit.exe"
+          
+          # Verify if the file is now in the correct directory
+          if (-not (Test-Path "$playitDir\playit.exe")) {
+              Write-Error "Playit client not found at $playitDir\playit.exe"
+              exit 1
+          }
+          
+          Write-Host "Playit client installed successfully at $playitDir\playit.exe"
 
       - name: Verify Playit Client Installation  
         run: |
