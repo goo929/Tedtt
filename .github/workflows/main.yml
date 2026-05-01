@@ -32,42 +32,41 @@ jobs:
         while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -lt $totalTime) {
             Write-Host "Connecting to Pinggy..."
             
-            # Start SSH and redirect BOTH output and errors to the same log file
-            # This ensures we catch the address link
-            ShellExecute -FilePath "ssh" -ArgumentList "-p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -T -R 0:localhost:3389 rdp@a.pinggy.io" > pinggy_log.txt 2>&1
+            # Use Start-Process and redirect both output and errors to catch the URL
+            Start-Process -FilePath "ssh" -ArgumentList "-p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -T -R 0:localhost:3389 rdp@a.pinggy.io" -RedirectStandardOutput "pinggy_out.txt" -RedirectStandardError "pinggy_err.txt"
             
-            # Wait a bit longer for the link to appear
+            # Wait for the handshake to finish
             Start-Sleep -s 15
             
             Write-Host "------------------------------------------"
             Write-Host "      YOUR RDP CONNECTION INFO            "
             Write-Host "------------------------------------------"
             
-            $LogContent = Get-Content pinggy_log.txt
-            $Addr = $LogContent | Select-String "tcp://"
+            # Combine the output from both files to find the link
+            $LogContent = Get-Content pinggy_out.txt, pinggy_err.txt -ErrorAction SilentlyContinue
+            $Addr = $LogContent | Select-String "tcp://" | Select-Object -Last 1
             
             if ($Addr) {
-                Write-Host $Addr
+                Write-Host "ADDRESS: $Addr"
             } else {
-                Write-Host "Link not found yet. Full Log Output:"
-                Write-Host $LogContent
+                Write-Host "⚠️ Link not found yet. Checking logs..."
+                $LogContent
             }
             
             Write-Host "User: RemoteUser"
             Write-Host "Pass: P@ssw0rd123!"
             Write-Host "------------------------------------------"
             
-            # Monitoring loop
+            # Monitoring loop to keep the script running
             while ($true) {
                 Start-Sleep -s 30
                 if ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -ge $totalTime) { break }
                 
-                # Check if SSH is still running
                 if (!(Get-Process ssh -ErrorAction SilentlyContinue)) {
-                    Write-Host "⚠️ SSH Tunnel crashed. Restarting..."
+                    Write-Host "⚠️ Connection flickered. Restarting tunnel..."
                     break
                 }
             }
-            Remove-Item pinggy_log.txt -ErrorAction SilentlyContinue
+            Remove-Item pinggy_out.txt, pinggy_err.txt -ErrorAction SilentlyContinue
         }
         
