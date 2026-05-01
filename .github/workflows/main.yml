@@ -11,14 +11,22 @@ jobs:
     steps:  
       - name: Configure Core RDP Settings  
         run: |  
-          # Enable Remote Desktop and disable Network Level Authentication (if needed)  
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `  
-                             -Name "fDenyTSConnections" -Value 0 -Force  
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `  
-                             -Name "UserAuthentication" -Value 0 -Force  
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `  
-                             -Name "SecurityLayer" -Value 0 -Force  
+          # Check if the registry path exists before modifying it
+          if (Test-Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server') {
+              # Enable Remote Desktop and disable Network Level Authentication (if needed)
+              Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                               -Name "fDenyTSConnections" -Value 0 -Force
 
+              Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                               -Name "UserAuthentication" -Value 0 -Force
+
+              Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                               -Name "SecurityLayer" -Value 0 -Force
+          } else {
+              Write-Error "Registry path not found: HKLM:\System\CurrentControlSet\Control\Terminal Server"
+              exit 1
+          }
+          
           # Remove any existing rule with the same name to avoid duplication  
           netsh advfirewall firewall delete rule name="RDP-Playit"  
             
