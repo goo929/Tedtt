@@ -1,4 +1,4 @@
-name: CI-Serveo-RDP
+name: CI-Loophole-RDP
 
 on: [push, workflow_dispatch]
 
@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-    - name: Configure RDP Settings
+    - name: Configure RDP
       run: |
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
@@ -22,48 +22,29 @@ jobs:
             Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
         }
 
-    - name: Start Serveo Tunnel
+    - name: Setup Loophole
       run: |
-        Write-Host "🚀 Starting Serveo Tunnel..."
+        # Download Loophole
+        Invoke-WebRequest https://github.com/loophole/cli/releases/download/1.0.0-beta.15/loophole_windows_64bit.zip -OutFile loophole.zip
+        Expand-Archive loophole.zip -DestinationPath . -Force
+
+    - name: Start Loophole Tunnel
+      run: |
+        Write-Host "🚀 Starting Loophole Tunnel..."
+        # Start loophole for TCP port 3389
+        Start-Process -FilePath ".\loophole.exe" -ArgumentList "tcp 3389 --nopreview" -RedirectStandardOutput "loophole_log.txt"
         
-        $totalTime = 21600 # 6 hours
-        $startTime = Get-Date
+        Start-Sleep -s 20
         
-        while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -lt $totalTime) {
-            # Start Serveo in the background. -R 0:localhost:3389 tells it to pick a random port for us.
-            Start-Process -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no -o ServerAliveInterval=60 -R 0:localhost:3389 serveo.net" -RedirectStandardOutput "serveo_log.txt" -RedirectStandardError "serveo_err.txt"
-            
-            # Wait for the link to generate
-            Start-Sleep -s 15
-            
-            Write-Host "------------------------------------------"
-            Write-Host "      YOUR RDP CONNECTION INFO            "
-            Write-Host "------------------------------------------"
-            
-            # Check both output and error logs for the forwarding line
-            $LogData = Get-Content serveo_log.txt, serveo_err.txt -ErrorAction SilentlyContinue
-            $Addr = $LogData | Select-String "Forwarding HTTP" -NotMatch | Select-String "forwarding"
-            
-            if ($Addr) {
-                Write-Host "URL: $Addr"
-            } else {
-                Write-Host "⚠️ Checking full log for address..."
-                $LogData
-            }
-            
-            Write-Host "User: RemoteUser"
-            Write-Host "Pass: P@ssw0rd123!"
-            Write-Host "------------------------------------------"
-            
-            # Keep monitoring the SSH process
-            while ($true) {
-                Start-Sleep -s 30
-                if ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -ge $totalTime) { break }
-                if (!(Get-Process ssh -ErrorAction SilentlyContinue)) {
-                    Write-Host "⚠️ Tunnel dropped. Restarting..."
-                    break
-                }
-            }
-            Remove-Item serveo_log.txt, serveo_err.txt -ErrorAction SilentlyContinue
-        }
+        Write-Host "------------------------------------------"
+        Write-Host "      YOUR RDP CONNECTION INFO            "
+        Write-Host "------------------------------------------"
+        # Grabbing the actual address from the log
+        Get-Content loophole_log.txt | Select-String "forwarding to"
+        Write-Host "User: RemoteUser"
+        Write-Host "Pass: P@ssw0rd123!"
+        Write-Host "------------------------------------------"
+        
+        # 6 Hour Keep-Alive
+        Start-Sleep -s 21600
         
