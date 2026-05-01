@@ -1,4 +1,4 @@
-name: CI-Pinggy-RDP-Stable
+name: CI-Serveo-RDP
 
 on: [push, workflow_dispatch]
 
@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-    - name: Configure RDP
+    - name: Configure RDP Settings
       run: |
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
@@ -22,51 +22,48 @@ jobs:
             Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
         }
 
-    - name: Start Rugged SSH Tunnel
+    - name: Start Serveo Tunnel
       run: |
-        Write-Host "🚀 Starting Pinggy Tunnel..."
+        Write-Host "🚀 Starting Serveo Tunnel..."
         
-        $totalTime = 21600
+        $totalTime = 21600 # 6 hours
         $startTime = Get-Date
         
         while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -lt $totalTime) {
-            Write-Host "Connecting to Pinggy..."
+            # Start Serveo in the background. -R 0:localhost:3389 tells it to pick a random port for us.
+            Start-Process -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no -o ServerAliveInterval=60 -R 0:localhost:3389 serveo.net" -RedirectStandardOutput "serveo_log.txt" -RedirectStandardError "serveo_err.txt"
             
-            # Use Start-Process and redirect both output and errors to catch the URL
-            Start-Process -FilePath "ssh" -ArgumentList "-p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -T -R 0:localhost:3389 rdp@a.pinggy.io" -RedirectStandardOutput "pinggy_out.txt" -RedirectStandardError "pinggy_err.txt"
-            
-            # Wait for the handshake to finish
+            # Wait for the link to generate
             Start-Sleep -s 15
             
             Write-Host "------------------------------------------"
             Write-Host "      YOUR RDP CONNECTION INFO            "
             Write-Host "------------------------------------------"
             
-            # Combine the output from both files to find the link
-            $LogContent = Get-Content pinggy_out.txt, pinggy_err.txt -ErrorAction SilentlyContinue
-            $Addr = $LogContent | Select-String "tcp://" | Select-Object -Last 1
+            # Check both output and error logs for the forwarding line
+            $LogData = Get-Content serveo_log.txt, serveo_err.txt -ErrorAction SilentlyContinue
+            $Addr = $LogData | Select-String "Forwarding HTTP" -NotMatch | Select-String "forwarding"
             
             if ($Addr) {
-                Write-Host "ADDRESS: $Addr"
+                Write-Host "URL: $Addr"
             } else {
-                Write-Host "⚠️ Link not found yet. Checking logs..."
-                $LogContent
+                Write-Host "⚠️ Checking full log for address..."
+                $LogData
             }
             
             Write-Host "User: RemoteUser"
             Write-Host "Pass: P@ssw0rd123!"
             Write-Host "------------------------------------------"
             
-            # Monitoring loop to keep the script running
+            # Keep monitoring the SSH process
             while ($true) {
                 Start-Sleep -s 30
                 if ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -ge $totalTime) { break }
-                
                 if (!(Get-Process ssh -ErrorAction SilentlyContinue)) {
-                    Write-Host "⚠️ Connection flickered. Restarting tunnel..."
+                    Write-Host "⚠️ Tunnel dropped. Restarting..."
                     break
                 }
             }
-            Remove-Item pinggy_out.txt, pinggy_err.txt -ErrorAction SilentlyContinue
+            Remove-Item serveo_log.txt, serveo_err.txt -ErrorAction SilentlyContinue
         }
         
