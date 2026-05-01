@@ -1,4 +1,4 @@
-name: CI-Pinggy-RDP
+name: CI-Pinggy-RDP-Stable
 
 on: [push, workflow_dispatch]
 
@@ -17,17 +17,45 @@ jobs:
     - name: Create RDP User
       run: |
         $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
-        New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
-        Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
+        if (!(Get-LocalUser -Name "RemoteUser" -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
+            Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
+        }
 
     - name: Start Rugged SSH Tunnel
       run: |
         Write-Host "🚀 Starting Pinggy Tunnel..."
-        # This loop restarts the tunnel automatically if it flickers
-        while ($true) {
-            # This opens a TCP tunnel. It will output the address in the logs.
-            ssh -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 rdp@a.pinggy.io
-            Write-Host "⚠️ Connection flickered. Reconnecting in 5s..."
+        
+        # We use -T to prevent the "stdin" error and -N to just forward ports
+        # The loop ensures that if your mobile data flickers, the tunnel restarts.
+        $totalTime = 21600
+        $startTime = Get-Date
+        
+        while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -lt $totalTime) {
+            Write-Host "Connecting to Pinggy..."
+            
+            # This command starts the tunnel and redirects the URL to pinggy_log.txt
+            Start-Process -FilePath "ssh" -ArgumentList "-p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -T -R 0:localhost:3389 rdp@a.pinggy.io" -RedirectStandardOutput "pinggy_log.txt"
+            
+            Start-Sleep -s 10
+            
+            Write-Host "------------------------------------------"
+            Write-Host "      YOUR RDP CONNECTION INFO            "
+            Write-Host "------------------------------------------"
+            Get-Content pinggy_log.txt | Select-String "tcp://"
+            Write-Host "User: RemoteUser"
+            Write-Host "Pass: P@ssw0rd123!"
+            Write-Host "------------------------------------------"
+            
+            # Wait for the process to exit (or for 6 hours to pass)
+            $proc = Get-Process ssh -ErrorAction SilentlyContinue
+            while ($proc -and !$proc.HasExited) {
+                Start-Sleep -s 30
+                if ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -ge $totalTime) { break }
+            }
+            
+            Write-Host "⚠️ Connection lost. Retrying in 5 seconds..."
+            Remove-Item pinggy_log.txt -ErrorAction SilentlyContinue
             Start-Sleep -s 5
         }
         
