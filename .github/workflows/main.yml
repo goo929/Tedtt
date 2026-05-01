@@ -31,7 +31,7 @@ jobs:
           netsh advfirewall firewall delete rule name="RDP-Playit"  
             
           # For testing, allow any incoming connection on port 3389  
-          netsh advfirewall firewall add rule name="RDP-Playit" `  
+          netsh advfirewall firewall add rule name="RDP-Playit" `
             dir=in action=allow protocol=TCP localport=3389  
 
           # (Optional) Restart the Remote Desktop service to ensure changes take effect  
