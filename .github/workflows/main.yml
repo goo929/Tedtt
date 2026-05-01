@@ -8,25 +8,45 @@ jobs:
     steps:
     - name: Configure Windows RDP
       run: |
+        # 1. Enable RDP and Firewall rules
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        
+        # 2. Relax NLA for better mobile app compatibility
+        (Get-WmiObject -class "Win32_TSGeneralSetting" -Namespace "root\cimv2\terminalservices" -Filter "TerminalName='RDP-Tcp'").SetUserAuthenticationRequired(0)
+
+        # 3. Create a fresh user to avoid 'runneradmin' permission issues
         $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
-        Set-LocalUser -Name "runneradmin" -Password $Password
+        New-LocalUser "RemoteUser" -Password $Password -Description "RDP User"
+        Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RemoteUser"
 
     - name: Download and Setup Bore
       run: |
+        # Using a direct versioned link to prevent "Not Found" errors
         $url = "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip"
         Invoke-WebRequest -Uri $url -OutFile bore.zip -UserAgent "NativeHost"
         Expand-Archive bore.zip -DestinationPath . -Force
 
     - name: Start Bore Tunnel
       run: |
+        # Start tunnel in background and capture the assigned port
         Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "bore_log.txt"
+        
+        # Wait for the server to assign a port
         Start-Sleep -s 10
+        
+        # Output the address clearly in the GitHub logs
         $BoreLog = Get-Content bore_log.txt
-        Write-Host "--- CONNECTION DETAILS ---"
-        $BoreLog | Select-String "listening at"
         Write-Host "--------------------------"
+        Write-Host "   RDP CONNECTION INFO    "
+        Write-Host "--------------------------"
+        $BoreLog | Select-String "listening at"
+        Write-Host "Username: RemoteUser"
+        Write-Host "Password: P@ssw0rd123!"
+        Write-Host "--------------------------"
+        
+        # Keep the runner alive for 6 hours
         Start-Sleep -s 21600
         
