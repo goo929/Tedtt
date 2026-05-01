@@ -6,45 +6,41 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-    - name: Configure Core RDP Settings
+    - name: Configure High-Speed RDP
       run: |
-        # Enable RDP and optimize for mobile tunnel stability
+        # 1. Enable RDP
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+        
+        # 2. DISABLE Network Level Authentication (NLA) - This fixes the "Stuck" screen
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 1 -Force
         
-        # Open Firewall for port 3389
+        # 3. Allow unencrypted connections (Better for high-latency mobile data)
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "MinEncryptionLevel" -Value 1 -Force
+        
         netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
-        
-        # Restart RDP Service to apply settings
         Restart-Service -Name TermService -Force
 
     - name: Create RDP User
       run: |
+        # Using a simple password to avoid keyboard entry errors on mobile
         $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
         New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
         Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
-        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RemoteUser"
 
-    - name: Install Ngrok via Winget
+    - name: Install Ngrok
       run: |
-        # Winget finds the correct download link automatically
+        # Using winget for the most reliable install
         winget install ngrok.ngrok --accept-package-agreements --accept-source-agreements
 
     - name: Start Ngrok Tunnel
       run: |
-        # Refresh path so the runner can see the new 'ngrok' command
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-        
-        # Authenticate
         ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
         
-        # Start the tunnel using your static domain
-        # Using Start-Process so it runs in the background
+        # Start tunnel with your permanent domain
         Start-Process -FilePath "ngrok" -ArgumentList "tcp --domain=accusatorial-hyacinth-steer.ngrok-free.dev 3389"
         
         Write-Host "🚀 RDP live at: accusatorial-hyacinth-steer.ngrok-free.dev"
-        
-        # Keep alive for 6 hours
         Start-Sleep -s 21600
         
