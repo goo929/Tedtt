@@ -1,4 +1,4 @@
-name: CI-Cloudflare-RDP
+name: CI-Cloudflare-Final
 
 on: [push, workflow_dispatch]
 
@@ -26,34 +26,34 @@ jobs:
       run: |
         Write-Host "🚀 Starting Cloudflare Tunnel..."
         
-        # Download the latest stable cloudflared.exe
+        # Download Cloudflared
         curl -L --output cloudflared.exe https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
         
-        # Start a quick tunnel for RDP
+        # Start Tunnel - Note: RDP requires the tcp:// prefix
         Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url tcp://localhost:3389" -RedirectStandardError "cf_log.txt"
         
-        # Wait for the link to be generated
-        Start-Sleep -s 20
+        # Give Cloudflare 30 seconds to establish the link over the network
+        Start-Sleep -s 30
         
         Write-Host "------------------------------------------"
         Write-Host "      YOUR RDP CONNECTION INFO            "
         Write-Host "------------------------------------------"
         
-        # Cloudflare prints the link to the error stream/log
+        # This regex specifically looks for the hostname in the log
         $CFLog = Get-Content cf_log.txt
-        $Addr = $CFLog | Select-String "trycloudflare.com" | Select-Object -First 1
+        $Addr = $CFLog | Select-String -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" | ForEach-Object { $_.Matches.Value }
         
         if ($Addr) {
-            Write-Host "ADDRESS: $Addr"
+            # Convert the HTTPS link Cloudflare prints to a TCP hostname for your app
+            $TCP_Addr = $Addr.Replace("https://", "")
+            Write-Host "HOSTNAME: $TCP_Addr"
         } else {
-            Write-Host "⚠️ Checking logs for link..."
-            $CFLog | Select-String "inf" | Select-Object -Last 10
+            Write-Host "⚠️ Link still loading. Full Logs below:"
+            $CFLog | Select-Object -Last 20
         }
         
         Write-Host "User: RemoteUser"
         Write-Host "Pass: P@ssw0rd123!"
         Write-Host "------------------------------------------"
         
-        # Keep alive for 6 hours
         Start-Sleep -s 21600
-        
