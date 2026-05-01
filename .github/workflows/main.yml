@@ -1,49 +1,42 @@
-name: CI
-
-
+name: CI-Bore-RDP
 
 on: [push, workflow_dispatch]
 
-
-
 jobs:
-
   build:
-
-
-
     runs-on: windows-latest
-
-
-
     steps:
+    - name: Configure Windows RDP
+      run: |
+        # Enable RDP
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        
+        # Set runneradmin password (Change "P@ssw0rd123!" to something else if you prefer)
+        $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
+        Set-LocalUser -Name "runneradmin" -Password $Password
 
-    - name: Download
+    - name: Download and Setup Bore
+      run: |
+        Invoke-WebRequest https://github.com/ekzhang/bore/releases/latest/download/bore-v0.5.1-x86_64-pc-windows-msvc.zip -OutFile bore.zip
+        Expand-Archive bore.zip -DestinationPath .
 
-      run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
-
-    - name: Extract
-
-      run: Expand-Archive ngrok.zip
-
-    - name: Auth
-
-      run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
-
-      env:
-
-        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-
-    - name: Enable TS
-
-      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
-
-    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-
-    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-
-    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-
-    - name: Create Tunnel
-
-      run: .\ngrok\ngrok.exe tcp 3389
+    - name: Start Bore Tunnel
+      run: |
+        # Start bore in the background and redirect output to a file so we can read the port
+        Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput "bore_log.txt"
+        
+        # Wait a few seconds for the tunnel to initialize
+        Start-Sleep -s 5
+        
+        # Display the connection details from the log
+        $BoreLog = Get-Content bore_log.txt
+        Write-Host "--- CONNECTION DETAILS ---"
+        $BoreLog | Select-String "listening at"
+        Write-Host "--------------------------"
+        
+        # Keep the runner alive for 6 hours (GitHub's max limit)
+        # Without this, the job finishes and the tunnel closes immediately
+        Start-Sleep -s 21600
+        
