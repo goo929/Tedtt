@@ -70,14 +70,25 @@ jobs:
           # Define the URL for Playit client
           $playitUrl = "https://github.com/playit-cloud/playit-cli/releases/download/v0.6.0/playit-windows-amd64.exe"
           
-          # Use curl to download the Playit client if Invoke-WebRequest fails
+          # Use curl to download the Playit client
           $installerPath = "$env:TEMP\playit.exe"
 
-          # Using curl to download the Playit client
+          # Download the Playit client using curl
           curl -L $playitUrl -o $installerPath
           
           # Move it to the Program Files directory
           Move-Item $installerPath -Destination "$env:ProgramFiles\Playit"  
+
+      - name: Verify Playit Client Installation  
+        run: |
+          # Verify that the Playit client exists before running it
+          $playitPath = "$env:ProgramFiles\Playit\playit.exe"
+          if (-not (Test-Path $playitPath)) {
+              Write-Error "Playit client not found at $playitPath"
+              exit 1
+          } else {
+              Write-Host "Playit client found at $playitPath"
+          }
 
       - name: Establish Playit Tunnel  
         run: |  
