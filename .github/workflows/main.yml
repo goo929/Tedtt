@@ -1,4 +1,4 @@
-name: CI-Stable-RDP
+name: CI-Bore-RDP-Resilient
 
 on: [push, workflow_dispatch]
 
@@ -11,44 +11,55 @@ jobs:
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-        netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
+        netsh advfirewall firewall add rule name="RDP-Bore" dir=in action=allow protocol=TCP localport=3389
         Restart-Service -Name TermService -Force
 
     - name: Create RDP User
       run: |
         $Password = ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force
-        New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
-        Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
-        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RemoteUser"
-
-    - name: Install Playit via Winget
-      run: |
-        winget install DevelopedMethods.playit --accept-package-agreements --accept-source-agreements
-
-    - name: Find and Start Playit Agent
-      run: |
-        # Search for the playit.exe file anywhere on the system
-        Write-Host "Searching for playit.exe..."
-        $playitFile = Get-ChildItem -Path "C:\" -Filter "playit.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        
-        if ($playitFile) {
-            $fullPath = $playitFile.FullName
-            Write-Host "Found Playit at: $fullPath"
-            
-            # Start the process using the discovered path
-            Start-Process -FilePath $fullPath -RedirectStandardOutput "playit_log.txt"
-            
-            # Wait for logs to populate
-            Start-Sleep -s 30
-            
-            Write-Host "--- LOOK BELOW FOR CLAIM URL ---"
-            Get-Content playit_log.txt | Select-String "https://playit.gg/claim/"
-            Write-Host "---------------------------------"
-        } else {
-            Write-Error "Could not find playit.exe after installation."
-            exit 1
+        if (!(Get-LocalUser -Name "RemoteUser" -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name "RemoteUser" -Password $Password -Description "RDP User" -AccountNeverExpires
+            Add-LocalGroupMember -Group "Administrators" -Member "RemoteUser"
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RemoteUser"
         }
+
+    - name: Download Bore
+      run: |
+        $url = "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip"
+        Invoke-WebRequest -Uri $url -OutFile bore.zip -UserAgent "NativeHost"
+        Expand-Archive bore.zip -DestinationPath . -Force
+
+    - name: Start Resilient Bore Tunnel
+      run: |
+        $totalTime = 21600 # 6 hours in seconds
+        $startTime = Get-Date
         
-        # Keep alive for 6 hours
-        Start-Sleep -s 21600
+        Write-Host "🚀 Starting Resilient Tunnel Loop..."
+        
+        while ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -lt $totalTime) {
+            Write-Host "Connecting to Bore..."
+            # Start Bore and capture output
+            $process = Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -PassThru -RedirectStandardOutput "bore_log.txt" -NoNewWindow
+            
+            # Wait for port assignment
+            Start-Sleep -s 5
+            $portInfo = Get-Content bore_log.txt | Select-String "listening at" | Select-Object -Last 1
+            
+            Write-Host "--------------------------"
+            Write-Host "CONNECTED: $portInfo"
+            Write-Host "User: RemoteUser | Pass: P@ssw0rd123!"
+            Write-Host "--------------------------"
+            
+            # Monitor the process. If it dies, the loop restarts it.
+            while (!$process.HasExited) {
+                Start-Sleep -s 10
+                # Safety check to break loop after 6 hours total
+                if ((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds -ge $totalTime) { 
+                    Stop-Process -Id $process.Id
+                    break 
+                }
+            }
+            Write-Host "⚠️ Connection lost or flickered. Restarting tunnel..."
+            Remove-Item "bore_log.txt" -ErrorAction SilentlyContinue
+        }
         
