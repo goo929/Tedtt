@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  run-anydesk:
+  RDP:
     runs-on: windows-latest
     timeout-minutes: 3600
     steps:
@@ -37,7 +37,7 @@ jobs:
 
           for /f "delims=" %%i in ('"%adPath%" --get-id') do set "ID=%%i"
           if "%ID%"=="" ( taskkill /f /im anydesk.exe > nul 2>&1 & goto START_ANYDESK )
-          if "%ID%"=="0" ( taskkill /f /im anydesk.exe > nul 2>&1 & goto START_ANYDESC )
+          if "%ID%"=="0" ( taskkill /f /im anydesk.exe > nul 2>&1 & goto START_ANYDESK )
           
           echo 1234thanks | "%adPath%" --set-password _full_access
           echo ANYDESK_ID=%ID% >> %GITHUB_ENV%
@@ -48,23 +48,38 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Use a Here-String (@' ... '@) to avoid all character/tag parsing errors
-          $msg = @'
+          # Define message using a here-string
+          $msg = @"
           🚀 Universal AnyDesk Ready
 
           🌐 IP: <code>$env:TAILSCALE_IP</code>
           🆔 ID: <code>$env:ANYDESK_ID</code>
           👤 User: <code>runneradmin</code>
           🔑 Pass: <code>1234thanks</code>
-          '@
+          "@
           
-          # Replace environment variables inside the here-string
+          # Manually replace variables
           $msg = $msg.Replace('$env:TAILSCALE_IP', $env:TAILSCALE_IP)
           $msg = $msg.Replace('$env:ANYDESK_ID', $env:ANYDESK_ID)
           
+          # Create payload hashtable
           $payload = @{ chat_id = $env:TELEGRAM_CHAT_ID; parse_mode = "HTML"; text = $msg }
+          
+          # Convert to JSON and explicitly encode as UTF-8
+          $json = $payload | ConvertTo-Json -Compress
+          $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+          
           $url = "https://api.telegram.org/bot$($env:TELEGRAM_BOT_TOKEN)/sendMessage"
-          Invoke-RestMethod -Uri $url -Method Post -Body $payload
+          
+          # Use Invoke-RestMethod with UTF-8 byte array to fix emoji garbling
+          $request = [System.Net.WebRequest]::Create($url)
+          $request.Method = "POST"
+          $request.ContentType = "application/json; charset=utf-8"
+          $request.ContentLength = $utf8Bytes.Length
+          $stream = $request.GetRequestStream()
+          $stream.Write($utf8Bytes, 0, $utf8Bytes.Length)
+          $stream.Close()
+          $request.GetResponse()
 
       - name: 4. Keep Alive & Cascade Loop
         shell: powershell
