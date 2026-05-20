@@ -57,7 +57,7 @@ jobs:
       #################################################################    
       # 3️⃣ Official AnyDesk Installation & Logic    
       ################################################################# 
-      - name: Official AnyDesk Installation & Logic
+      - name: Official Anydesk Installation Logic
         shell: cmd
         env:
           AD_PASS: ${{ env.ANYDESK_PASS }}
@@ -81,40 +81,7 @@ jobs:
           echo ANYDESK_ID=%ID% >> %GITHUB_ENV%
 
       #################################################################    
-      # 4️⃣ Install rclone    
-      ################################################################# 
-      - name: Install rclone    
-        run: |    
-          Invoke-WebRequest https://downloads.rclone.org/rclone-current-windows-amd64.zip -OutFile rclone.zip    
-          Expand-Archive rclone.zip -DestinationPath $env:TEMP    
-          Copy-Item "$env:TEMP\rclone*\rclone.exe" "C:\Windows\System32\rclone.exe"
-
-      #################################################################    
-      # 5️⃣ Restore State (If exists)    
-      ################################################################# 
-      - name: Restore Previous AnyDesk State
-        env:    
-          RCLONE_CONFIG_MYDRIVE_TYPE: "drive"    
-          RCLONE_CONFIG_MYDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}    
-        shell: powershell
-        run: |
-          $workDir = "D:\persistence_stage"
-          if (!(Test-Path $workDir)) { New-Item $workDir -ItemType Directory -Force }
-          
-          $exists = rclone lsf mydrive:anydesk-backups/state.zip 2>$null
-          if ($exists) {
-              rclone copy mydrive:anydesk-backups/state.zip D:\ --progress
-              Expand-Archive -Path "D:\state.zip" -DestinationPath $workDir -Force
-              rclone delete mydrive:anydesk-backups/state.zip --drive-use-trash=true
-              
-              # Restore user app data if found
-              if (Test-Path "$workDir\AppData") {
-                  robocopy "$workDir\AppData" "$env:USERPROFILE\AppData\Roaming\AnyDesk" /E /XJ /R:0 /W:0 /MT:16 /NP
-              }
-          }
-
-      #################################################################    
-      # 6️⃣ Send Credentials to Telegram    
+      # 4️⃣ Send Credentials to Telegram    
       ################################################################# 
       - name: Send Notification to Telegram    
         env:    
@@ -125,27 +92,22 @@ jobs:
           AD_ID: ${{ env.ANYDESK_ID }}
         shell: powershell
         run: |    
-          $message = @"
-          🚀 <b>AnyDesk Environment Ready</b>
-
-          🆔 <b>AnyDesk ID:</b> <code>$env:AD_ID</code>
-          🌐 <b>Tailscale IP:</b> <code>$env:AD_IP</code>
-          👤 <b>User:</b> <code>runneradmin</code>
-          🔑 <b>Pass:</b> <code>$env:AD_PASS</code>
-
-          <i>Session monitoring active. State will auto-save at 330 minutes.</i>
-          "@
+          $payload = @{
+              chat_id = $env:TELEGRAM_CHAT_ID
+              parse_mode = "HTML"
+              text = "🚀 <b>AnyDesk Environment Ready</b>`n`n🆔 <b>AnyDesk ID:</b> <code>$env:AD_ID</code>`n🌐 <b>Tailscale IP:</b> <code>$env:AD_IP</code>`n👤 <b>User:</b> <code>runneradmin</code>`n🔑 <b>Pass:</b> <code>$env:AD_PASS</code>`n`n<i>Session loop active. Will recreate in 330 mins.</i>"
+          }
+          $json = ConvertTo-Json $payload
+          $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+          
           $url = "https://api.telegram.org/bot$($env:TELEGRAM_TOKEN)/sendMessage"      
-          $body = @{ chat_id = $env:TELEGRAM_CHAT_ID; text = $message; parse_mode = "HTML" } | ConvertTo-Json      
-          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json" -Body $body
+          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $utf8Bytes
 
       #################################################################    
-      # 7️⃣ Monitor, Backup & Infinite Loop Loop Trigger    
+      # 5️⃣ Keep Alive & Cascade Loop Trigger    
       ################################################################# 
       - name: Monitor and Cascade Workflow
         env:    
-          RCLONE_CONFIG_MYDRIVE_TYPE: "drive"    
-          RCLONE_CONFIG_MYDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}    
           GH_PAT: ${{ secrets.GH_PAT }}    
         shell: powershell
         run: |
@@ -160,20 +122,6 @@ jobs:
             
             # Trigger cascade loop at 330 minutes (5.5 hours) before GitHub terminates runner
             if ($elapsed -ge 330) {
-              Write-Host "🕒 5.5 Hours reached. Preparing migration backup..." -ForegroundColor Yellow
-              $stage = "D:\to_pack"
-              if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-              New-Item $stage -ItemType Directory -Force
-
-              # Backup the AnyDesk configuration folder to maintain ID / connection layout
-              $adAppData = "$env:USERPROFILE\AppData\Roaming\AnyDesk"
-              if (Test-Path $adAppData) {
-                  robocopy "$adAppData" "$stage\AppData" /E /XJ /R:0 /W:0
-              }
-
-              Compress-Archive -Path "$stage\*" -DestinationPath "D:\state.zip" -Force
-              rclone copy "D:\state.zip" "mydrive:anydesk-backups" --progress
-
               Write-Host "🔄 Dispatching next AnyDesk run..." -ForegroundColor Green
               $uri = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches"
               Invoke-RestMethod -Uri $uri -Method POST -Headers @{Authorization="token $env:GH_PAT"; Accept="application/vnd.github+json"} -Body '{"ref":"main"}'
@@ -183,7 +131,7 @@ jobs:
           }
 
       #################################################################    
-      # 8️⃣ Final Status Notification    
+      # 6️⃣ Final Status Notification    
       ################################################################# 
       - name: Send Final Status to Telegram    
         if: always()    
@@ -193,8 +141,14 @@ jobs:
         shell: powershell
         run: |    
           $status = "${{ job.status }}"
-          $message = "🏁 <b>AnyDesk Session Transitioned</b>`nStatus: <b>$status</b>"
+          $payload = @{
+              chat_id = $env:TELEGRAM_CHAT_ID
+              parse_mode = "HTML"
+              text = "🏁 <b>AnyDesk Session Transitioned</b>`nStatus: <b>$status</b>"
+          }
+          $json = ConvertTo-Json $payload
+          $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+
           $url = "https://api.telegram.org/bot$($env:TELEGRAM_TOKEN)/sendMessage"
-          $body = @{ chat_id = $env:TELEGRAM_CHAT_ID; text = $message; parse_mode = "HTML" } | ConvertTo-Json
-          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json" -Body $body
+          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $utf8Bytes
           
