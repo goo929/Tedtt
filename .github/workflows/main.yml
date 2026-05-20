@@ -49,19 +49,19 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          $msg = "🚀 <b>Universal AnyDesk Ready</b>`n`n🌐 <b>IP:</b> <code>$env:TAILSCALE_IP</code>`n🆔 <b>ID:</b> <code>$env:ANYDESK_ID</code>`n👤 <b>User:</b> <code>runneradmin</code>`n🔑 <b>Pass:</b> <code>1234thanks</code>"
+          $nl = [Environment]::NewLine
+          $msg = '🚀 <b>Universal AnyDesk Ready</b>' + $nl + $nl + '🌐 <b>IP:</b> <code>' + $env:TAILSCALE_IP + '</code>' + $nl + '🆔 <b>ID:</b> <code>' + $env:ANYDESK_ID + '</code>' + $nl + '👤 <b>User:</b> <code>runneradmin</code>' + $nl + '🔑 <b>Pass:</b> <code>1234thanks</code>'
+          
           $payload = @{ chat_id = $env:TELEGRAM_CHAT_ID; parse_mode = "HTML"; text = $msg }
           $json = ConvertTo-Json $payload
-          $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
           $url = "https://api.telegram.org/bot$env:TELEGRAM_TOKEN/sendMessage"
-          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $bytes
+          Invoke-RestMethod -Uri $url -Method Post -Body $payload
 
       - name: 4. Keep Alive & Cascade Loop
         shell: powershell
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          # Run for 5.5 hours then trigger new build
           $start = Get-Date
           while ((Get-Date) -lt $start.AddMinutes(330)) {
               Write-Host "Online | AnyDesk ID: $env:ANYDESK_ID | $(Get-Date)"
@@ -70,5 +70,6 @@ jobs:
           
           Write-Host "🔄 Triggering next session..."
           $uri = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches"
-          Invoke-RestMethod -Uri $uri -Method POST -Headers @{Authorization="token $env:GH_PAT"; Accept="application/vnd.github+json"} -Body '{"ref":"main"}'
+          $headers = @{Authorization = "token $env:GH_PAT"; Accept = "application/vnd.github+json"}
+          Invoke-RestMethod -Uri $uri -Method POST -Headers $headers -Body '{"ref":"main"}'
           
