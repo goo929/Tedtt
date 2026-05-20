@@ -49,21 +49,20 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Use raw string composition for JSON to avoid PowerShell object encoding issues
-          $json = @"
-          {
-            "chat_id": "$env:TELEGRAM_CHAT_ID",
-            "parse_mode": "HTML",
-            "text": "🚀 Universal AnyDesk Ready`n`n🌐 IP: <code>$env:TAILSCALE_IP</code>`n🆔 ID: <code>$env:ANYDESK_ID</code>`n👤 User: <code>runneradmin</code>`n🔑 Pass: <code>1234thanks</code>"
-          }
-          "@
+          # Construct the JSON string
+          $text = "🚀 Universal AnyDesk Ready`n`n🌐 IP: <code>$env:TAILSCALE_IP</code>`n🆔 ID: <code>$env:ANYDESK_ID</code>`n👤 User: <code>runneradmin</code>`n🔑 Pass: <code>1234thanks</code>"
+          $json = @{
+            chat_id    = $env:TELEGRAM_CHAT_ID
+            parse_mode = "HTML"
+            text       = $text
+          } | ConvertTo-Json -Compress
           
-          # Save to file with explicit UTF-8 encoding (no BOM)
-          $json | Out-File -FilePath "payload.json" -Encoding utf8NoBOM
+          # Force UTF-8 encoding without BOM to ensure emojis render correctly
+          [System.IO.File]::WriteAllText("$env:GITHUB_WORKSPACE\payload.json", $json, [System.Text.UTF8Encoding]::new($false))
           
-          # Use curl to send the file. This is the most reliable way to preserve emoji encoding.
+          # Send via curl.exe using the file path directly
           $url = "https://api.telegram.org/bot$($env:TELEGRAM_BOT_TOKEN)/sendMessage"
-          curl.exe -s -X POST $url -H "Content-Type: application/json" -d @payload.json
+          curl.exe -s -X POST $url -H "Content-Type: application/json" --data @"$env:GITHUB_WORKSPACE\payload.json"
 
       - name: 4. Keep Alive & Cascade Loop
         shell: powershell
