@@ -10,57 +10,20 @@ jobs:
   run-anydesk:
     runs-on: windows-latest
     timeout-minutes: 3600
-
     steps:
-      #################################################################    
-      # 1️⃣ Install & Connect Tailscale    
-      ################################################################# 
-      - name: Install & Connect Tailscale
+      - name: 1. Install & Connect Tailscale
         shell: powershell
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.92.3-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=anydesk-node
-          
-          $tsIP = $null    
-          for ($i=0;$i -lt 10;$i++){    
-            $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4    
-            if($tsIP){break}    
-            Start-Sleep 5    
-          }    
-          if(-not $tsIP){exit 1}
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-${{ github.run_id }}
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           "TAILSCALE_IP=$tsIP" | Out-File -Append $env:GITHUB_ENV
 
-      #################################################################    
-      # 2️⃣ Generate Dynamic Secure Password    
-      ################################################################# 
-      - name: Generate Dynamic Secure Password
-        shell: powershell
-        run: |
-          Add-Type -AssemblyName System.Security    
-          $charSet = @{    
-            Upper   = [char[]]"ABCDEFGHIJKLMNOPQRSTUVWXYZ"    
-            Lower   = [char[]]"abcdefghijklmnopqrstuvwxyz"    
-            Number  = [char[]]"0123456789"    
-            Special = [char[]]"!@#$%^&*"    
-          }    
-          $rawPassword = @()    
-          $rawPassword += $charSet.Upper | Get-Random -Count 4    
-          $rawPassword += $charSet.Lower | Get-Random -Count 4    
-          $rawPassword += $charSet.Number | Get-Random -Count 4    
-          $rawPassword += $charSet.Special | Get-Random -Count 4    
-          $password = -join ($rawPassword | Sort-Object { Get-Random })    
-          echo "ANYDESK_PASS=$password" >> $env:GITHUB_ENV
-
-      #################################################################    
-      # 3️⃣ Official AnyDesk Installation & Logic    
-      ################################################################# 
-      - name: Official AnyDesk Installation & Logic
+      - name: 2. Official AnyDesk Installation & Logic
         shell: cmd
-        env:
-          AD_PASS: ${{ env.ANYDESK_PASS }}
         run: |
           powershell -Command "Invoke-WebRequest -Uri 'https://download.anydesk.com/AnyDesk.exe' -OutFile 'AnyDesk.exe'"
           AnyDesk.exe --install "C:\AnyDesk" --start-with-win --silent
@@ -77,83 +40,35 @@ jobs:
           if "%ID%"=="" ( taskkill /f /im anydesk.exe > nul 2>&1 & goto START_ANYDESK )
           if "%ID%"=="0" ( taskkill /f /im anydesk.exe > nul 2>&1 & goto START_ANYDESK )
           
-          echo %AD_PASS% | "%adPath%" --set-password _full_access
+          echo 1234thanks | "%adPath%" --set-password _full_access
           echo ANYDESK_ID=%ID% >> %GITHUB_ENV%
 
-      #################################################################    
-      # 4️⃣ Send Credentials to Telegram    
-      ################################################################# 
-      - name: Send Notification to Telegram    
-        env:    
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}    
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}    
-          AD_PASS: ${{ env.ANYDESK_PASS }}    
-          AD_IP: ${{ env.TAILSCALE_IP }}    
-          AD_ID: ${{ env.ANYDESK_ID }}
+      - name: 3. Send Telegram Notification
         shell: powershell
-        run: |    
-          $msgText = "🚀 <b>AnyDesk Environment Ready</b>`n`n🆔 <b>AnyDesk ID:</b> <code>$($env:AD_ID)</code>`n🌐 <b>Tailscale IP:</b> <code>$($env:AD_IP)</code>`n👤 <b>User:</b> <code>runneradmin</code>`n🔑 <b>Pass:</b> <code>$($env:AD_PASS)</code>`n`n<i>Session loop active. Will recreate in 330 mins.</i>"
-          
-          $payload = @{
-              chat_id = $env:TELEGRAM_CHAT_ID
-              parse_mode = "HTML"
-              text = $msgText
-          }
-          
-          $json = ConvertTo-Json $payload
-          $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-          
-          $url = "https://api.telegram.org/bot$($env:TELEGRAM_TOKEN)/sendMessage"      
-          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $utf8Bytes
-
-      #################################################################    
-      # 5️⃣ Keep Alive & Cascade Loop Trigger    
-      ################################################################# 
-      - name: Monitor and Cascade Workflow
-        env:    
-          GH_PAT: ${{ secrets.GH_PAT }}    
-        shell: powershell
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          $start = Get-Date
-          $lastLog = -1
-          while ($true) {
-            $elapsed = [math]::Floor((New-TimeSpan -Start $start -End (Get-Date)).TotalMinutes)
-            if ($elapsed -gt $lastLog) {
-                Write-Host "AnyDesk Session Active | Time: $elapsed min"
-                $lastLog = $elapsed
-            }
-            
-            if ($elapsed -ge 330) {
-              Write-Host "🔄 Dispatching next AnyDesk run..." -ForegroundColor Green
-              $uri = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches"
-              Invoke-RestMethod -Uri $uri -Method POST -Headers @{Authorization="token $env:GH_PAT"; Accept="application/vnd.github+json"} -Body '{"ref":"main"}'
-              break
-            }
-            Start-Sleep 60
-          }
-
-      #################################################################    
-      # 6️⃣ Final Status Notification    
-      ################################################################# 
-      - name: Send Final Status to Telegram    
-        if: always()    
-        env:    
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}    
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}    
-        shell: powershell
-        run: |    
-          $status = "${{ job.status }}"
-          $msgText = "🏁 <b>AnyDesk Session Transitioned</b>`nStatus: <b>$status</b>"
-          
-          $payload = @{
-              chat_id = $env:TELEGRAM_CHAT_ID
-              parse_mode = "HTML"
-              text = $msgText
-          }
-          
+          $msg = "🚀 <b>Universal AnyDesk Ready</b>`n`n🌐 <b>IP:</b> <code>$env:TAILSCALE_IP</code>`n🆔 <b>ID:</b> <code>$env:ANYDESK_ID</code>`n👤 <b>User:</b> <code>runneradmin</code>`n🔑 <b>Pass:</b> <code>1234thanks</code>"
+          $payload = @{ chat_id = $env:TELEGRAM_CHAT_ID; parse_mode = "HTML"; text = $msg }
           $json = ConvertTo-Json $payload
-          $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+          $url = "https://api.telegram.org/bot$env:TELEGRAM_TOKEN/sendMessage"
+          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $bytes
 
-          $url = "https://api.telegram.org/bot$($env:TELEGRAM_TOKEN)/sendMessage"
-          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body $utf8Bytes
+      - name: 4. Keep Alive & Cascade Loop
+        shell: powershell
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          # Run for 5.5 hours then trigger new build
+          $start = Get-Date
+          while ((Get-Date) -lt $start.AddMinutes(330)) {
+              Write-Host "Online | AnyDesk ID: $env:ANYDESK_ID | $(Get-Date)"
+              Start-Sleep -Seconds 300
+          }
+          
+          Write-Host "🔄 Triggering next session..."
+          $uri = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches"
+          Invoke-RestMethod -Uri $uri -Method POST -Headers @{Authorization="token $env:GH_PAT"; Accept="application/vnd.github+json"} -Body '{"ref":"main"}'
           
