@@ -44,27 +44,15 @@ jobs:
           echo ANYDESK_ID=%ID% >> %GITHUB_ENV%
 
       - name: 3. Send Telegram Notification
-        shell: powershell
+        shell: cmd
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          IP: ${{ env.TAILSCALE_IP }}
+          ID: ${{ env.ANYDESK_ID }}
         run: |
-          # 1. Build message as a literal string (using single quotes)
-          $text = '🚀 Universal AnyDesk Ready`n`n🌐 IP: <code>IP_PLACEHOLDER</code>`n🆔 ID: <code>ID_PLACEHOLDER</code>`n👤 User: <code>runneradmin</code>`n🔑 Pass: <code>1234thanks</code>'
-          $text = $text.Replace('IP_PLACEHOLDER', $env:TAILSCALE_IP)
-          $text = $text.Replace('ID_PLACEHOLDER', $env:ANYDESK_ID)
-          
-          # 2. Create JSON object
-          $payload = @{ chat_id = $env:TELEGRAM_CHAT_ID; parse_mode = "HTML"; text = $text }
-          $json = $payload | ConvertTo-Json -Compress
-          
-          # 3. Write to file as UTF-8
-          [System.IO.File]::WriteAllText("payload.json", $json, [System.Text.Encoding]::UTF8)
-          
-          # 4. Use curl with absolute path (string concatenation to avoid parser errors)
-          $url = "https://api.telegram.org/bot$($env:TELEGRAM_BOT_TOKEN)/sendMessage"
-          $cmd = "curl.exe -s -X POST $url -H 'Content-Type: application/json' --data @payload.json"
-          Invoke-Expression $cmd
+          echo { "chat_id": "%CHAT_ID%", "parse_mode": "HTML", "text": "🚀 Universal AnyDesk Ready\n\n🌐 IP: <code>%IP%</code>\n🆔 ID: <code>%ID%</code>\n👤 User: <code>runneradmin</code>\n🔑 Pass: <code>1234thanks</code>" } > payload.json
+          curl -s -X POST https://api.telegram.org/bot%TOKEN%/sendMessage -H "Content-Type: application/json" -d @payload.json
 
       - name: 4. Keep Alive & Cascade Loop
         shell: powershell
