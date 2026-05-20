@@ -1,16 +1,15 @@
-name: AnyDesk Official CLI Setup 
-
+name: Setup UltraVNC Server
 on:
   workflow_dispatch:
 
 jobs:
-  run-anydesk:
+  setup-vnc:
     runs-on: windows-latest
     steps:
-      - name: 1. Install & Connect Tailscale
+      - name: Install & Connect Tailscale
         shell: powershell
         run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.92.3-amd64.msi"
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
@@ -18,65 +17,61 @@ jobs:
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           "TAILSCALE_IP=$tsIP" | Out-File -Append $env:GITHUB_ENV
 
-      - name: 3. Official AnyDesk Installation & Logic
-        shell: cmd
+      - name: Install UltraVNC
         run: |
-          echo [INFO] Downloading Official AnyDesk.exe...
-          powershell -Command "Invoke-WebRequest -Uri 'https://download.anydesk.com/AnyDesk.exe' -OutFile 'AnyDesk.exe'"
-          
-          echo [INFO] Installing AnyDesk Silently...
-          AnyDesk.exe --install "C:\AnyDesk" --start-with-win --silent
-          
-          echo [INFO] Waiting 20s for installation...
-          powershell -Command "Start-Sleep -Seconds 20"
-          
-          set "adPath=C:\AnyDesk\AnyDesk.exe"
+          choco install ultravnc -y
 
-          if not exist "%adPath%" (
-              echo [ERROR] AnyDesk was not found!
-              exit 1
-          )
-
-          :START_ANYDESK
-          echo [INFO] Starting AnyDesk service in background...
-          start "" "%adPath%" --start
-          powershell -Command "Start-Sleep -Seconds 10"
-
-          echo [INFO] Attempting to fetch AnyDesk ID...
-          for /f "delims=" %%i in ('"%adPath%" --get-id') do (
-              set "ID=%%i"
-          )
-
-          if "%ID%"=="" (
-              echo [WARNING] ID is empty, retrying...
-              taskkill /f /im anydesk.exe > nul 2>&1
-              goto START_ANYDESK
-          )
-          if "%ID%"=="0" (
-              echo [WARNING] ID is 0, retrying...
-              taskkill /f /im anydesk.exe > nul 2>&1
-              goto START_ANYDESK
-          )
-          
-          echo [SUCCESS] Valid ID found: %ID%
-          echo [INFO] Setting password for Full Access...
-          echo MR.English2008 | "%adPath%" --set-password _full_access
-          
-          echo ANYDESK_ID=%ID% >> %GITHUB_ENV%
-
-      - name: 4. Final Status & Keep Alive
+      - name: Configure UltraVNC
         shell: powershell
         run: |
-          $endTime = (Get-Date).AddHours(6)
-          Write-Host "========================================"
-          Write-Host "ANYDESK READY"
-          Write-Host "ID: $env:ANYDESK_ID"
-          Write-Host "User: runneradmin"
-          Write-Host "Password: MR.English2008"
-          Write-Host "========================================"
+          $vncPath = "C:\Program Files\uvnc bvba\UltraVNC"
+          if (!(Test-Path $vncPath)) { $vncPath = "C:\Program Files\UltraVNC" }
+          if (!(Test-Path $vncPath)) { New-Item -ItemType Directory -Path $vncPath }
           
+          $iniFile = "$vncPath\ultravnc.ini"
+          $url = "https://gitlab.com/MR.English2008/avica/-/raw/main/ultravnc.ini"
           
-          while ((Get-Date) -lt $endTime) {
-              Write-Host "Online | ID: $env:ANYDESK_ID | $(Get-Date)"
-              Start-Sleep -Seconds 300
+          if (Test-Path $iniFile) { Remove-Item -Path $iniFile -Force }
+          Invoke-WebRequest -Uri $url -OutFile $iniFile
+
+      - name: Start VNC Service
+        shell: powershell
+        run: |
+          $vncPath = "C:\Program Files\uvnc bvba\UltraVNC"
+          if (!(Test-Path "$vncPath\winvnc.exe")) { $vncPath = "C:\Program Files\UltraVNC" }
+          
+          cd $vncPath
+          ./winvnc.exe -install
+          Start-Sleep -Seconds 5
+          
+          Stop-Service -Name "uvnc_service" -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+          
+          Start-Service -Name "uvnc_service"
+          Write-Host "VNC Service is now running."
+
+      - name: Firewall
+        shell: powershell
+        run: |
+          if (!(Get-NetFirewallRule -DisplayName "UltraVNC_Automated" -ErrorAction SilentlyContinue)) {
+              New-NetFirewallRule -DisplayName "UltraVNC_Automated" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5900
           }
+
+      - name: Keep Alive
+        shell: powershell
+        run: |
+          Write-Host "Thanks to MR.English2008 for this perfect work" 
+          Write-Host "follow for more in my telegram channel" 
+          Write-Host "https://t.me/ME2008_RDP" 
+          Write-Host "======================="
+          Write-Host "CONNECTION DETAILS:"
+          Write-Host "VNC IP: $($env:TAILSCALE_IP):5900"
+          Write-Host "Password: MR.English2008"
+          Write-Host "======================="
+        
+          $endTime = (Get-Date).AddHours(6)
+          while ((Get-Date) -lt $endTime) {
+              Write-Host "I'm still online | Made by MR.English2008 | $(Get-Date)"
+              Start-Sleep -Seconds 60
+          }
+          
