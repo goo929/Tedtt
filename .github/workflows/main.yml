@@ -1,82 +1,200 @@
-name: AnyDesk Official CLI Setup 
+name: RDP
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   run-anydesk:
     runs-on: windows-latest
+    timeout-minutes: 3600
+
     steps:
-      - name: 1. Install & Connect Tailscale
+      #################################################################    
+      # 1️⃣ Install & Connect Tailscale    
+      ################################################################# 
+      - name: Install & Connect Tailscale
         shell: powershell
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.92.3-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-${{ github.run_id }}
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=anydesk-node
+          
+          $tsIP = $null    
+          for ($i=0;$i -lt 10;$i++){    
+            $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4    
+            if($tsIP){break}    
+            Start-Sleep 5    
+          }    
+          if(-not $tsIP){exit 1}
           "TAILSCALE_IP=$tsIP" | Out-File -Append $env:GITHUB_ENV
 
-      - name: 3. Official AnyDesk Installation & Logic
-        shell: cmd
+      #################################################################    
+      # 2️⃣ Generate Dynamic Secure Password    
+      ################################################################# 
+      - name: Generate Dynamic Secure Password
+        shell: powershell
         run: |
-          echo [INFO] Downloading Official AnyDesk.exe...
+          Add-Type -AssemblyName System.Security    
+          $charSet = @{    
+            Upper   = [char[]]"ABCDEFGHIJKLMNOPQRSTUVWXYZ"    
+            Lower   = [char[]]"abcdefghijklmnopqrstuvwxyz"    
+            Number  = [char[]]"0123456789"    
+            Special = [char[]]"!@#$%^&*"    
+          }    
+          $rawPassword = @()    
+          $rawPassword += $charSet.Upper | Get-Random -Count 4    
+          $rawPassword += $charSet.Lower | Get-Random -Count 4    
+          $rawPassword += $charSet.Number | Get-Random -Count 4    
+          $rawPassword += $charSet.Special | Get-Random -Count 4    
+          $password = -join ($rawPassword | Sort-Object { Get-Random })    
+          echo "ANYDESK_PASS=$password" >> $env:GITHUB_ENV
+
+      #################################################################    
+      # 3️⃣ Official AnyDesk Installation & Logic    
+      ################################################################# 
+      - name: Official AnyDesk Installation & Logic
+        shell: cmd
+        env:
+          AD_PASS: ${{ env.ANYDESK_PASS }}
+        run: |
           powershell -Command "Invoke-WebRequest -Uri 'https://download.anydesk.com/AnyDesk.exe' -OutFile 'AnyDesk.exe'"
-          
-          echo [INFO] Installing AnyDesk Silently...
           AnyDesk.exe --install "C:\AnyDesk" --start-with-win --silent
-          
-          echo [INFO] Waiting 20s for installation...
           powershell -Command "Start-Sleep -Seconds 20"
           
           set "adPath=C:\AnyDesk\AnyDesk.exe"
-
-          if not exist "%adPath%" (
-              echo [ERROR] AnyDesk was not found!
-              exit 1
-          )
+          if not exist "%adPath%" exit 1
 
           :START_ANYDESK
-          echo [INFO] Starting AnyDesk service in background...
           start "" "%adPath%" --start
           powershell -Command "Start-Sleep -Seconds 10"
 
-          echo [INFO] Attempting to fetch AnyDesk ID...
-          for /f "delims=" %%i in ('"%adPath%" --get-id') do (
-              set "ID=%%i"
-          )
-
-          if "%ID%"=="" (
-              echo [WARNING] ID is empty, retrying...
-              taskkill /f /im anydesk.exe > nul 2>&1
-              goto START_ANYDESK
-          )
-          if "%ID%"=="0" (
-              echo [WARNING] ID is 0, retrying...
-              taskkill /f /im anydesk.exe > nul 2>&1
-              goto START_ANYDESK
-          )
+          for /f "delims=" %%i in ('"%adPath%" --get-id') do set "ID=%%i"
+          if "%ID%"=="" ( taskkill /f /im anydesk.exe > nul 2>&1 & goto START_ANYDESK )
+          if "%ID%"=="0" ( taskkill /f /im anydesk.exe > nul 2>&1 & goto START_ANYDESK )
           
-          echo [SUCCESS] Valid ID found: %ID%
-          echo [INFO] Setting password for Full Access...
-          echo MR.English2008 | "%adPath%" --set-password _full_access
-          
+          echo %AD_PASS% | "%adPath%" --set-password _full_access
           echo ANYDESK_ID=%ID% >> %GITHUB_ENV%
 
-      - name: 4. Final Status & Keep Alive
+      #################################################################    
+      # 4️⃣ Install rclone    
+      ################################################################# 
+      - name: Install rclone    
+        run: |    
+          Invoke-WebRequest https://downloads.rclone.org/rclone-current-windows-amd64.zip -OutFile rclone.zip    
+          Expand-Archive rclone.zip -DestinationPath $env:TEMP    
+          Copy-Item "$env:TEMP\rclone*\rclone.exe" "C:\Windows\System32\rclone.exe"
+
+      #################################################################    
+      # 5️⃣ Restore State (If exists)    
+      ################################################################# 
+      - name: Restore Previous AnyDesk State
+        env:    
+          RCLONE_CONFIG_MYDRIVE_TYPE: "drive"    
+          RCLONE_CONFIG_MYDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}    
         shell: powershell
         run: |
-          $endTime = (Get-Date).AddHours(6)
-          Write-Host "========================================"
-          Write-Host "ANYDESK READY"
-          Write-Host "ID: $env:ANYDESK_ID"
-          Write-Host "User: runneradmin"
-          Write-Host "Password: MR.English2008"
-          Write-Host "========================================"
+          $workDir = "D:\persistence_stage"
+          if (!(Test-Path $workDir)) { New-Item $workDir -ItemType Directory -Force }
           
-          
-          while ((Get-Date) -lt $endTime) {
-              Write-Host "Online | ID: $env:ANYDESK_ID | $(Get-Date)"
-              Start-Sleep -Seconds 300
+          $exists = rclone lsf mydrive:anydesk-backups/state.zip 2>$null
+          if ($exists) {
+              rclone copy mydrive:anydesk-backups/state.zip D:\ --progress
+              Expand-Archive -Path "D:\state.zip" -DestinationPath $workDir -Force
+              rclone delete mydrive:anydesk-backups/state.zip --drive-use-trash=true
+              
+              # Restore user app data if found
+              if (Test-Path "$workDir\AppData") {
+                  robocopy "$workDir\AppData" "$env:USERPROFILE\AppData\Roaming\AnyDesk" /E /XJ /R:0 /W:0 /MT:16 /NP
+              }
           }
+
+      #################################################################    
+      # 6️⃣ Send Credentials to Telegram    
+      ################################################################# 
+      - name: Send Notification to Telegram    
+        env:    
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}    
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}    
+          AD_PASS: ${{ env.ANYDESK_PASS }}    
+          AD_IP: ${{ env.TAILSCALE_IP }}    
+          AD_ID: ${{ env.ANYDESK_ID }}
+        shell: powershell
+        run: |    
+          $message = @"
+          🚀 <b>AnyDesk Environment Ready</b>
+
+          🆔 <b>AnyDesk ID:</b> <code>$env:AD_ID</code>
+          🌐 <b>Tailscale IP:</b> <code>$env:AD_IP</code>
+          👤 <b>User:</b> <code>runneradmin</code>
+          🔑 <b>Pass:</b> <code>$env:AD_PASS</code>
+
+          <i>Session monitoring active. State will auto-save at 330 minutes.</i>
+          "@
+          $url = "https://api.telegram.org/bot$($env:TELEGRAM_TOKEN)/sendMessage"      
+          $body = @{ chat_id = $env:TELEGRAM_CHAT_ID; text = $message; parse_mode = "HTML" } | ConvertTo-Json      
+          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json" -Body $body
+
+      #################################################################    
+      # 7️⃣ Monitor, Backup & Infinite Loop Loop Trigger    
+      ################################################################# 
+      - name: Monitor and Cascade Workflow
+        env:    
+          RCLONE_CONFIG_MYDRIVE_TYPE: "drive"    
+          RCLONE_CONFIG_MYDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}    
+          GH_PAT: ${{ secrets.GH_PAT }}    
+        shell: powershell
+        run: |
+          $start = Get-Date
+          $lastLog = -1
+          while ($true) {
+            $elapsed = [math]::Floor((New-TimeSpan -Start $start -End (Get-Date)).TotalMinutes)
+            if ($elapsed -gt $lastLog) {
+                Write-Host "AnyDesk Session Active | Time: $elapsed min"
+                $lastLog = $elapsed
+            }
+            
+            # Trigger cascade loop at 330 minutes (5.5 hours) before GitHub terminates runner
+            if ($elapsed -ge 330) {
+              Write-Host "🕒 5.5 Hours reached. Preparing migration backup..." -ForegroundColor Yellow
+              $stage = "D:\to_pack"
+              if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+              New-Item $stage -ItemType Directory -Force
+
+              # Backup the AnyDesk configuration folder to maintain ID / connection layout
+              $adAppData = "$env:USERPROFILE\AppData\Roaming\AnyDesk"
+              if (Test-Path $adAppData) {
+                  robocopy "$adAppData" "$stage\AppData" /E /XJ /R:0 /W:0
+              }
+
+              Compress-Archive -Path "$stage\*" -DestinationPath "D:\state.zip" -Force
+              rclone copy "D:\state.zip" "mydrive:anydesk-backups" --progress
+
+              Write-Host "🔄 Dispatching next AnyDesk run..." -ForegroundColor Green
+              $uri = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches"
+              Invoke-RestMethod -Uri $uri -Method POST -Headers @{Authorization="token $env:GH_PAT"; Accept="application/vnd.github+json"} -Body '{"ref":"main"}'
+              break
+            }
+            Start-Sleep 60
+          }
+
+      #################################################################    
+      # 8️⃣ Final Status Notification    
+      ################################################################# 
+      - name: Send Final Status to Telegram    
+        if: always()    
+        env:    
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}    
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}    
+        shell: powershell
+        run: |    
+          $status = "${{ job.status }}"
+          $message = "🏁 <b>AnyDesk Session Transitioned</b>`nStatus: <b>$status</b>"
+          $url = "https://api.telegram.org/bot$($env:TELEGRAM_TOKEN)/sendMessage"
+          $body = @{ chat_id = $env:TELEGRAM_CHAT_ID; text = $message; parse_mode = "HTML" } | ConvertTo-Json
+          Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json" -Body $body
+          
