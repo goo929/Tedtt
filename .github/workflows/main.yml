@@ -1,4 +1,4 @@
-name: RDP
+name: AnyDesk Official CLI Setup
 
 on:
   workflow_dispatch:
@@ -57,7 +57,7 @@ jobs:
       #################################################################    
       # 3️⃣ Official AnyDesk Installation & Logic    
       ################################################################# 
-      - name: Official Anydesk Installation Logic
+      - name: Official AnyDesk Installation & Logic
         shell: cmd
         env:
           AD_PASS: ${{ env.ANYDESK_PASS }}
@@ -92,11 +92,14 @@ jobs:
           AD_ID: ${{ env.ANYDESK_ID }}
         shell: powershell
         run: |    
+          $msgText = "🚀 <b>AnyDesk Environment Ready</b>`n`n🆔 <b>AnyDesk ID:</b> <code>$($env:AD_ID)</code>`n🌐 <b>Tailscale IP:</b> <code>$($env:AD_IP)</code>`n👤 <b>User:</b> <code>runneradmin</code>`n🔑 <b>Pass:</b> <code>$($env:AD_PASS)</code>`n`n<i>Session loop active. Will recreate in 330 mins.</i>"
+          
           $payload = @{
               chat_id = $env:TELEGRAM_CHAT_ID
               parse_mode = "HTML"
-              text = "🚀 <b>AnyDesk Environment Ready</b>`n`n🆔 <b>AnyDesk ID:</b> <code>$env:AD_ID</code>`n🌐 <b>Tailscale IP:</b> <code>$env:AD_IP</code>`n👤 <b>User:</b> <code>runneradmin</code>`n🔑 <b>Pass:</b> <code>$env:AD_PASS</code>`n`n<i>Session loop active. Will recreate in 330 mins.</i>"
+              text = $msgText
           }
+          
           $json = ConvertTo-Json $payload
           $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
           
@@ -120,7 +123,6 @@ jobs:
                 $lastLog = $elapsed
             }
             
-            # Trigger cascade loop at 330 minutes (5.5 hours) before GitHub terminates runner
             if ($elapsed -ge 330) {
               Write-Host "🔄 Dispatching next AnyDesk run..." -ForegroundColor Green
               $uri = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches"
@@ -141,11 +143,14 @@ jobs:
         shell: powershell
         run: |    
           $status = "${{ job.status }}"
+          $msgText = "🏁 <b>AnyDesk Session Transitioned</b>`nStatus: <b>$status</b>"
+          
           $payload = @{
               chat_id = $env:TELEGRAM_CHAT_ID
               parse_mode = "HTML"
-              text = "🏁 <b>AnyDesk Session Transitioned</b>`nStatus: <b>$status</b>"
+              text = $msgText
           }
+          
           $json = ConvertTo-Json $payload
           $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
 
