@@ -49,20 +49,22 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Construct the JSON string
-          $text = "🚀 Universal AnyDesk Ready`n`n🌐 IP: <code>$env:TAILSCALE_IP</code>`n🆔 ID: <code>$env:ANYDESK_ID</code>`n👤 User: <code>runneradmin</code>`n🔑 Pass: <code>1234thanks</code>"
-          $json = @{
-            chat_id    = $env:TELEGRAM_CHAT_ID
-            parse_mode = "HTML"
-            text       = $text
-          } | ConvertTo-Json -Compress
+          # 1. Build message as a literal string (using single quotes)
+          $text = '🚀 Universal AnyDesk Ready`n`n🌐 IP: <code>IP_PLACEHOLDER</code>`n🆔 ID: <code>ID_PLACEHOLDER</code>`n👤 User: <code>runneradmin</code>`n🔑 Pass: <code>1234thanks</code>'
+          $text = $text.Replace('IP_PLACEHOLDER', $env:TAILSCALE_IP)
+          $text = $text.Replace('ID_PLACEHOLDER', $env:ANYDESK_ID)
           
-          # Force UTF-8 encoding without BOM to ensure emojis render correctly
-          [System.IO.File]::WriteAllText("$env:GITHUB_WORKSPACE\payload.json", $json, [System.Text.UTF8Encoding]::new($false))
+          # 2. Create JSON object
+          $payload = @{ chat_id = $env:TELEGRAM_CHAT_ID; parse_mode = "HTML"; text = $text }
+          $json = $payload | ConvertTo-Json -Compress
           
-          # Send via curl.exe using the file path directly
+          # 3. Write to file as UTF-8
+          [System.IO.File]::WriteAllText("payload.json", $json, [System.Text.Encoding]::UTF8)
+          
+          # 4. Use curl with absolute path (string concatenation to avoid parser errors)
           $url = "https://api.telegram.org/bot$($env:TELEGRAM_BOT_TOKEN)/sendMessage"
-          curl.exe -s -X POST $url -H "Content-Type: application/json" --data @"$env:GITHUB_WORKSPACE\payload.json"
+          $cmd = "curl.exe -s -X POST $url -H 'Content-Type: application/json' --data @payload.json"
+          Invoke-Expression $cmd
 
       - name: 4. Keep Alive & Cascade Loop
         shell: powershell
