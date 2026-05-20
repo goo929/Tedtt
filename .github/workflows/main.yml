@@ -1,4 +1,5 @@
 name: RDP
+
 on:
   workflow_dispatch:
   push:
@@ -48,38 +49,21 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Define message using a here-string
-          $msg = @"
-          🚀 Universal AnyDesk Ready
-
-          🌐 IP: <code>$env:TAILSCALE_IP</code>
-          🆔 ID: <code>$env:ANYDESK_ID</code>
-          👤 User: <code>runneradmin</code>
-          🔑 Pass: <code>1234thanks</code>
+          # Use raw string composition for JSON to avoid PowerShell object encoding issues
+          $json = @"
+          {
+            "chat_id": "$env:TELEGRAM_CHAT_ID",
+            "parse_mode": "HTML",
+            "text": "🚀 Universal AnyDesk Ready`n`n🌐 IP: <code>$env:TAILSCALE_IP</code>`n🆔 ID: <code>$env:ANYDESK_ID</code>`n👤 User: <code>runneradmin</code>`n🔑 Pass: <code>1234thanks</code>"
+          }
           "@
           
-          # Manually replace variables
-          $msg = $msg.Replace('$env:TAILSCALE_IP', $env:TAILSCALE_IP)
-          $msg = $msg.Replace('$env:ANYDESK_ID', $env:ANYDESK_ID)
+          # Save to file with explicit UTF-8 encoding (no BOM)
+          $json | Out-File -FilePath "payload.json" -Encoding utf8NoBOM
           
-          # Create payload hashtable
-          $payload = @{ chat_id = $env:TELEGRAM_CHAT_ID; parse_mode = "HTML"; text = $msg }
-          
-          # Convert to JSON and explicitly encode as UTF-8
-          $json = $payload | ConvertTo-Json -Compress
-          $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-          
+          # Use curl to send the file. This is the most reliable way to preserve emoji encoding.
           $url = "https://api.telegram.org/bot$($env:TELEGRAM_BOT_TOKEN)/sendMessage"
-          
-          # Use Invoke-RestMethod with UTF-8 byte array to fix emoji garbling
-          $request = [System.Net.WebRequest]::Create($url)
-          $request.Method = "POST"
-          $request.ContentType = "application/json; charset=utf-8"
-          $request.ContentLength = $utf8Bytes.Length
-          $stream = $request.GetRequestStream()
-          $stream.Write($utf8Bytes, 0, $utf8Bytes.Length)
-          $stream.Close()
-          $request.GetResponse()
+          curl.exe -s -X POST $url -H "Content-Type: application/json" -d @payload.json
 
       - name: 4. Keep Alive & Cascade Loop
         shell: powershell
