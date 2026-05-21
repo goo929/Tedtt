@@ -51,7 +51,7 @@ jobs:
           IP: ${{ env.TAILSCALE_IP }}
           ID: ${{ env.ANYDESK_ID }}
         run: |
-          echo { "chat_id": "%CHAT_ID%", "parse_mode": "HTML", "text": "ðŸš€ Universal AnyDesk Ready\n\nðŸŒ IP: <code>%IP%</code>\nðŸ†” ID: <code>%ID%</code>\nðŸ‘¤ User: <code>runneradmin</code>\nðŸ”‘ Pass: <code>1234thanks</code>" } > payload.json
+          echo { "chat_id": "%CHAT_ID%", "parse_mode": "HTML", "text": "🚀 Universal AnyDesk Ready\n\n🌐 IP: <code>%IP%</code>\n🆔 ID: <code>%ID%</code>\n👤 User: <code>runneradmin</code>\n🔑 Pass: <code>1234thanks</code>" } > payload.json
           curl -s -X POST https://api.telegram.org/bot%TOKEN%/sendMessage -H "Content-Type: application/json" -d @payload.json
 
       - name: 4. Keep Alive & Cascade Loop
@@ -65,7 +65,7 @@ jobs:
               Start-Sleep -Seconds 300
           }
           
-          Write-Host "ðŸ”„ Triggering next session..."
+          Write-Host "🔄 Triggering next session..."
           $uri = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches"
           $headers = @{Authorization = "token $env:GH_PAT"; Accept = "application/vnd.github+json"}
           Invoke-RestMethod -Uri $uri -Method POST -Headers $headers -Body '{"ref":"main"}'
